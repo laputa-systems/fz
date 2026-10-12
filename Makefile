@@ -12,7 +12,7 @@ RELEASE_RUSTFLAGS := -Zlocation-detail=none -Zunstable-options -Cpanic=immediate
 # well as in the Linux release image.
 cargo = $(if $(findstring -linux-musl,$(TARGET)),,$(if $(filter release-static release-dynamic test,$(1)),CARGO_TARGET_$(TARGET_ENV)_LINKER=clang ,)$(if $(filter release-static release-dynamic,$(1)),RUSTFLAGS="$(RELEASE_RUSTFLAGS)")) MUSL_TARGET="$(TARGET)" MUSL_BUILD_MODE="$(1)" $(CARGO_CMD)
 
-.PHONY: build test test-ci release release-dynamic verify-release verify-release-dynamic install
+.PHONY: build test test-ci lint release release-dynamic verify-release verify-release-dynamic install
 
 build:
 	$(call cargo,dev) build
@@ -22,6 +22,10 @@ test:
 
 test-ci:
 	$(call cargo,test) test --quiet --release
+
+lint:
+	cargo fmt --all
+	cargo clippy --fix --allow-dirty --all-targets --all-features -- --deny warnings
 
 release:
 	$(call cargo,release-static) clean -p $(NAME) --release --target $(TARGET)
