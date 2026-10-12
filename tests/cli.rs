@@ -5,7 +5,11 @@ fn run(args: &[&str], input: &[u8]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_fz"))
         .args(args).stdin(Stdio::piped()).stdout(Stdio::piped())
         .stderr(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(input).unwrap();
+    // A program that fails before reading stdin (such as a missing tty) closes the pipe first.
+    match child.stdin.take().unwrap().write_all(input) {
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+        result => result.unwrap(),
+    }
     child.wait_with_output().unwrap()
 }
 

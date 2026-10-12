@@ -7,7 +7,7 @@
 
 use std::borrow::Cow;
 #[cfg(not(test))]
-use std::ffi::c_char;
+use std::ffi::{c_char, CStr};
 use std::ffi::{c_int, OsString};
 use std::io::{self, IsTerminal, Read, Write};
 use std::os::unix::ffi::OsStringExt;
@@ -42,13 +42,12 @@ const HELP: &str = "Usage: fz [OPTION]...
 ";
 
 impl Options {
-    fn parse() -> Result<Option<Self>, String> {
+    fn parse(mut args: impl Iterator<Item = Vec<u8>>) -> Result<Option<Self>, String> {
         let mut options = Self {
             lines: 10, prompt: Cow::Borrowed(b"> "), query: Vec::new(),
             tty: Cow::Borrowed(Path::new("/dev/tty")), show_scores: false, show_info: false,
             filter: None, delimiter: b'\n', workers: 0,
         };
-        let mut args = std::env::args_os().skip(1).map(OsString::into_vec);
         while let Some(arg) = args.next() {
             if arg == b"--" {
                 if args.next().is_some() { return Err("Unexpected positional argument".into()); }
@@ -177,13 +176,17 @@ fn run(options: Options) -> io::Result<bool> {
 
 #[cfg(not(test))]
 #[unsafe(no_mangle)]
-pub extern "C" fn main(_argc: c_int, _argv: *const *const c_char) -> c_int {
-    cli()
+// Arguments come from argc/argv because musl populates `std::env::args` only during
+// Rust runtime start-up, which this entry point skips; they would arrive empty.
+pub extern "C" fn main(argc: c_int, argv: *const *const c_char) -> c_int {
+    let args = (1..usize::try_from(argc).unwrap_or(0))
+        .map(|index| unsafe { CStr::from_ptr(*argv.add(index)) }.to_bytes().to_vec());
+    cli(args)
 }
 
 #[cfg_attr(test, allow(dead_code))]
-fn cli() -> c_int {
-    match Options::parse() {
+fn cli(args: impl Iterator<Item = Vec<u8>>) -> c_int {
+    match Options::parse(args) {
         Ok(None) => 0,
         Ok(Some(options)) => match run(options) {
             Ok(true) => 0,
