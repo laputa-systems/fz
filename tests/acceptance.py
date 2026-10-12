@@ -450,12 +450,24 @@ class Acceptance(unittest.TestCase):
         session.send(ESC)
         self.assert_exit(session, b"", 1, b"")
 
-        session = self.session(b"foo\nbar\n")
-        session.wait_for_lines([">", "foo", "bar"])
-        session.send(ESC)
-        time.sleep(0.005)  # Strictly below fzy's 25 ms ambiguous-key timeout.
-        session.send(b"[A")
-        self.assert_exit(session, b"\r", 0, b"bar\n")
+        # The fragments only exercise the timeout if the harness delivers them
+        # inside fzy's 25 ms window. A loaded runner can overshoot a 5 ms sleep,
+        # so attempts that missed the window are retried rather than judged.
+        gaps = []
+        for _ in range(10):
+            session = self.session(b"foo\nbar\n")
+            session.wait_for_lines([">", "foo", "bar"])
+            session.send(ESC)
+            sent = time.monotonic()
+            time.sleep(0.005)
+            session.send(b"[A")
+            gap = time.monotonic() - sent
+            gaps.append(round(gap * 1000, 1))
+            if gap < 0.020:
+                self.assert_exit(session, b"\r", 0, b"bar\n")
+                return
+            session.close()
+        self.fail("harness never delivered the arrow fragments within the window; gaps in ms: %s" % gaps)
 
     def test_sigwinch_redraw_preserves_editor_and_tty_contract(self):
         session = self.session(b"foo\nbar\n")
