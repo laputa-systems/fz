@@ -14,7 +14,12 @@ printf 'src/main.rs\nsrc/lib.rs\n' | target/release/fz -e mr -s
 
 The checked-in `rust-toolchain.toml` selects the compiler. The normal release
 profile matches `~/d/e`: `opt-level = 3`, fat LTO, one codegen unit, aborting
-panics, and stripped symbols. It uses the prebuilt standard library.
+panics, and stripped symbols. `cargo build --release` uses the prebuilt standard
+library; `make release` rebuilds it with the flags used for published artifacts.
+
+The `release.yml` workflow is dispatched manually. It builds the macOS arm64 and
+Linux musl (dynamic and static) binaries, runs the tests on each, and publishes a
+prerelease tagged `release-<sha>`.
 On macOS the linker omits unused dynamic libraries, avoiding an unused `iconv`
 load introduced by libc's declarations.
 
