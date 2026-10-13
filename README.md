@@ -1,99 +1,67 @@
 # fz
 
-A small Rust port of John Hawthorn's **fzy**. Candidates arrive
-on stdin, the interface uses `/dev/tty`, and Enter writes one selection to stdout.
-With no matches, Enter writes the query instead. Escape or Ctrl-C/D/G cancels
-with status 1 and no stdout. Successful selection and noninteractive filtering
-return status 0, including filters with no matches.
+`fz` is a small Rust port of John Hawthorn's **fzy** fuzzy selector. It reads candidates from stdin, lets you filter and choose one in your terminal, and writes the selection to stdout.
+
+## Install
+
+Download the matching ZIP from [GitHub Releases](https://github.com/laputa-systems/fz/releases). The manual release workflow publishes prereleases for these targets:
+
+| Platform | Archive |
+| --- | --- |
+| macOS arm64 | `fz-aarch64-apple-darwin.zip` |
+| Linux x86_64, static | `fz-x86_64-unknown-linux-musl-static.zip` |
+| Linux x86_64, dynamic | `fz-x86_64-unknown-linux-musl.zip` |
+| Linux arm64, static | `fz-aarch64-unknown-linux-musl-static.zip` |
+| Linux arm64, dynamic | `fz-aarch64-unknown-linux-musl.zip` |
+
+Choose a static Linux archive unless your system provides the musl loader.
+
+Extract the archive, then put its executable on your `PATH`. For macOS arm64:
 
 ```sh
-cargo build --release
-find . -type f | target/release/fz
-printf 'src/main.rs\nsrc/lib.rs\n' | target/release/fz -e mr -s
+mkdir -p ~/.local/bin
+unzip fz-aarch64-apple-darwin.zip
+install -m 755 fz-aarch64-apple-darwin ~/.local/bin/fz
 ```
 
-The checked-in `rust-toolchain.toml` selects the compiler. The normal release
-profile matches `~/d/e`: `opt-level = 3`, fat LTO, one codegen unit, aborting
-panics, and stripped symbols. `cargo build --release` uses the prebuilt standard
-library; `make release` rebuilds it with the flags used for published artifacts.
+Add `~/.local/bin` to `PATH` if it is not already there.
 
-The `release.yml` workflow is dispatched manually. It builds the macOS arm64 and
-Linux musl (dynamic and static) binaries, runs the tests on each, and publishes a
-prerelease tagged `release-<sha>`.
-On macOS the linker omits unused dynamic libraries, avoiding an unused `iconv`
-load introduced by libc's declarations.
+## Use
 
-Terminal access uses `rustix` with terminal and event support. Linux uses
-`libc` solely for signal masks and `signalfd`, preserving the caller's mask
-without installing a signal handler. The
-benchmark-only dependency is `rustybench`, including its allocation profiler.
-See [the benchmark guide](benches/README.md) for in-process allocation checks,
-release-process CPU and peak RSS comparisons, and completed terminal redraws.
-
-Options retain fzy's `-l`/`--lines`, `-p`/`--prompt`, `-q`/`--query`,
-`-e`/`--show-matches`, `-t`/`--tty`, `-s`/`--show-scores`, `-0`/`--read-null`,
-`-i`/`--show-info`, help, and version. `-j`/`--workers` sets a worker ceiling;
-`-j1` keeps searches on the calling thread. Large searches use up to four workers
-by default, and small searches stay on the caller to avoid thread startup cost. Benchmark mode, configuration,
-shell integration, previews, and multiple selection are outside this port.
-
-Up/down or Ctrl-P/N (also Ctrl-K/J) select, wrapping at the ends. Left/right,
-Home/End, and Ctrl-A/E move within the query. Backspace deletes a code point,
-Ctrl-W deletes the preceding word, and Ctrl-U deletes everything before the
-cursor. Tab completes the selected candidate; PageUp/PageDown move by a page.
-
-Matching follows the upstream byte-oriented algorithm, including its asymmetric
-ASCII case handling: lowercase query letters accept either case; uppercase query
-letters require uppercase candidates. UTF-8 query editing moves by code point;
-matching does not perform Unicode normalization or case folding. Empty candidate
-records are skipped, newline input preserves carriage returns, and NUL-delimited
-input can contain newlines. Output always ends records with a newline.
-
-Scores reward consecutive letters, word starts, slashes, CamelCase, and dots, and
-penalize gaps. Equal scores retain input order. Empty queries have score `-inf`,
-exact matches `inf`, and candidates longer than 1024 bytes remain eligible but
-have score `-inf` and no highlighted positions. Queries are bounded to 4096 bytes
-in the interactive editor.
-
-## Verification
+Pipe candidates into `fz` for interactive selection:
 
 ```sh
-cargo test
-cargo tree
-wc -c target/release/fz
+printf 'alpha\nbeta\n' | fz
 ```
 
-The Rust tests port upstream matching, choices, and property tests. The acceptance
-suite uses Python 3's standard library for PTYs and a small ANSI screen reader;
-Python is a test tool only. Differential checks compare stdout, scores, ordering,
-exit status, and interactive selections against a separately built fzy binary.
+By default, input records are separated by newlines and empty records are skipped; carriage returns are preserved. Enter writes the selected candidate followed by a newline. If nothing matches, Enter writes the query. Escape or Ctrl-C, Ctrl-D, or Ctrl-G cancels with status 1 and no stdout.
 
-To build the oracle without writing to the upstream checkout:
+Use `--show-matches` to filter without opening a terminal:
 
 ```sh
-mkdir -p target/upstream
-cp -R ~/d/fzy/src ~/d/fzy/test ~/d/fzy/deps ~/d/fzy/Makefile target/upstream/
-make -C target/upstream fzy test
-FZY_ORACLE="$PWD/target/upstream/fzy" cargo test
+fz --show-matches=mr < paths.txt
 ```
 
-The behavioral reference is upstream commit
-`34b88869d022e861da4846c4463aea3ddfb3ff30`. Its algorithm and ported tests are
-MIT licensed, copyright John Hawthorn; the notice is retained in `LICENSE`.
+This prints matching candidates in score order and exits with status 0, including when there are no matches. Ties keep input order. `--read-null` reads NUL-separated records, which can contain newlines; selected output still ends with a newline.
 
-Runtime compatibility is verified on macOS ARM64 with the pinned toolchain.
-Linux ARM64 is also tested in an Alpine container; Linux x86_64 runs under
-emulation. The upstream checkout was
-left untouched; its copied C suite passed all 32 tests.
+## Options
 
-The initial core, CLI, and acceptance suites were confirmed failing before
-production implementation. Three later terminal regressions (page endpoints,
-scroll margin, and info-row cleanup) were added after review fixes; their
-pre-fix behavior was subsequently checked in an isolated copy. The ARM scoring
-rounding regression was reproduced in a failing Rust test before its fix.
-Linux signal-mask restoration and the x86_64 resize failure were likewise
-confirmed failing before the `signalfd` fix. Score rounding follows the native
-reference builds: macOS Clang contracts the initial gap expression when FMA
-is available; Linux GCC with upstream's C99 flags rounds it twice. A Linux
-ordering regression covers that difference. Custom C compiler contraction
-flags can change upstream's ordering for scores separated by one ULP.
+| Option | Effect |
+| --- | --- |
+| `-l`, `--lines=LINES` | Number of result rows (default 10; minimum 3; or `max`) |
+| `-p`, `--prompt=PROMPT` | Prompt text (default `> `) |
+| `-q`, `--query=QUERY` | Start with a query |
+| `-e`, `--show-matches=QUERY` | Print sorted matches without a terminal |
+| `-t`, `--tty=TTY` | Terminal device (default `/dev/tty`) |
+| `-s`, `--show-scores` | Show match scores |
+| `-0`, `--read-null` | Read NUL-separated candidates |
+| `-j`, `--workers=NUM` | Maximum workers (default up to four; small searches use one) |
+| `-i`, `--show-info` | Show the match count |
+| `-h`, `--help` | Show help |
+| `-v`, `--version` | Show version |
+
+Up/Down or Ctrl-P/N (also Ctrl-K/J) moves through results. Left/Right, Home/End, and Ctrl-A/E move the query cursor. Backspace deletes a character, Ctrl-W deletes the preceding word, Ctrl-U deletes before the cursor, Tab completes the selected candidate, and PageUp/PageDown moves by a page.
+
+Matching follows fzy's byte-oriented behavior: lowercase ASCII query letters match either case, uppercase letters match uppercase only, and non-ASCII bytes match exactly. Query editing moves by UTF-8 code point; matching does not normalize or case-fold Unicode.
+
+For help, use `fz --help` or visit the [issue tracker](https://github.com/laputa-systems/fz/issues). The project is MIT licensed; see [LICENSE](LICENSE).
