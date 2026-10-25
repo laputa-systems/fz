@@ -11,8 +11,8 @@ make release TARGET=aarch64-apple-darwin
 make verify-release TARGET=aarch64-apple-darwin
 ```
 
-The release workflow runs the Linux Makefile targets inside the builder defined in [`Dockerfile`](../Dockerfile): `make release` and `make verify-release` for static binaries, and `make release-dynamic` and `make verify-release-dynamic` for dynamic binaries. Static verification checks that a binary has no dynamic interpreter or dependencies; dynamic verification checks for the musl loader and dependencies.
+The release workflow runs `make release` and `make verify-release` inside the builder defined in [`Dockerfile`](../Dockerfile). Verification rejects Linux binaries with an ELF interpreter or shared-library dependency.
 
 ## Published artifacts
 
-The manual [`release` workflow](../.github/workflows/release.yml) builds and tests each target in the published matrix, verifies both Linux link modes, and creates ZIP archives on a prerelease tagged `release-<commit-sha>`. Linux archives contain both dynamic and static builds. See the user-facing [installation instructions](../README.md) for the target matrix and archive names.
+The manual [`release` workflow](../.github/workflows/release.yml) builds and tests each target in the published matrix, checks Linux binaries for static linking, and creates ZIP archives on a prerelease tagged `release-<commit-sha>`. See the user-facing [installation instructions](../README.md) for the target matrix and archive names.
