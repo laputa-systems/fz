@@ -4,24 +4,21 @@
 
 ## Install
 
-Download the matching ZIP from [GitHub Releases](https://github.com/laputa-systems/fz/releases). The manual release workflow publishes prereleases for these targets:
+Download a prerelease from [GitHub Releases](https://github.com/laputa-systems/fz/releases). Each release publishes `SHA256SUMS` and two static Linux archives:
 
 | Platform | Archive |
 | --- | --- |
-| macOS arm64 | `fz-aarch64-apple-darwin.zip` |
-| Linux x86_64, static | `fz-x86_64-unknown-linux-musl-static.zip` |
-| Linux x86_64, dynamic | `fz-x86_64-unknown-linux-musl.zip` |
-| Linux arm64, static | `fz-aarch64-unknown-linux-musl-static.zip` |
-| Linux arm64, dynamic | `fz-aarch64-unknown-linux-musl.zip` |
+| Linux x86_64 | `fz-x86_64-unknown-linux-musl-static.zip` |
+| Linux arm64 | `fz-aarch64-unknown-linux-musl-static.zip` |
 
-Choose a static Linux archive unless your system provides the musl loader.
+The release workflow builds macOS arm64 and does not publish it. Build that binary from a checkout; see [Release](docs/release.md).
 
-Extract the archive, then put its executable on your `PATH`. For macOS arm64:
+Extract an archive and put its executable on your `PATH`:
 
 ```sh
 mkdir -p ~/.local/bin
-unzip fz-aarch64-apple-darwin.zip
-install -m 755 fz-aarch64-apple-darwin ~/.local/bin/fz
+unzip fz-x86_64-unknown-linux-musl-static.zip
+install -m 755 fz-x86_64-unknown-linux-musl-static ~/.local/bin/fz
 ```
 
 Add `~/.local/bin` to `PATH` if it is not already there.

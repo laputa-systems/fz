@@ -676,9 +676,6 @@ class Acceptance(unittest.TestCase):
                        b"--help", b"--version"):
             self.assertIn(option, help_text)
         self.assertNotIn(b"benchmark", help_text.lower())
-        # fz deliberately keeps -j as a compatibility parser input but makes
-        # no claim to run a worker pool.  Upstream fzy documents its pool, so
-        # do not apply this fz-specific help identity check to the oracle.
         if BIN.name != "fzy":
             self.assertIn(b"Usage: fz", help_text)
             self.assertIn(b"Maximum workers", help_text)

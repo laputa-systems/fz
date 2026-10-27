@@ -1,18 +1,21 @@
 # Release
 
-The repository pins its compiler in [`rust-toolchain.toml`](../rust-toolchain.toml). It selects a nightly toolchain with `rust-src`, `llvm-tools`, and `clippy`. The standard Cargo release build uses the prebuilt standard library; release artifacts rebuild it with the pinned toolchain.
+The compiler pin is [`rust-toolchain.toml`](../rust-toolchain.toml): nightly with `rust-src`, `llvm-tools`, and `clippy`. `cargo build --release` uses the prebuilt standard library. `make release` rebuilds `std` with the `dist` profile.
 
-## Local and workflow builds
+## Local builds
 
-Build the host release binary with `cargo build --release`. On macOS arm64, the release artifact build and verification are:
+On macOS arm64:
 
 ```sh
 make release TARGET=aarch64-apple-darwin
 make verify-release TARGET=aarch64-apple-darwin
+make install TARGET=aarch64-apple-darwin
 ```
 
-The release workflow runs `make release` and `make verify-release` inside the builder defined in [`Dockerfile`](../Dockerfile). Verification rejects Linux binaries with an ELF interpreter or shared-library dependency.
+`make install` copies `target/$TARGET/dist/fz` to `~/.local/bin/fz` and, on Darwin, ad-hoc signs that copy. On Linux musl, `verify-release` requires a stripped static binary with no ELF interpreter and no `NEEDED` entry. It skips those checks for other targets.
 
-## Published artifacts
+Linux release builds use the image in [`Dockerfile`](../Dockerfile). The [release workflow](../.github/workflows/release.yml) builds that image, then runs `make release` and `make verify-release` inside it.
 
-The manual [`release` workflow](../.github/workflows/release.yml) builds and tests each target in the published matrix, checks Linux binaries for static linking, and creates ZIP archives on a prerelease tagged `release-<commit-sha>`. See the user-facing [installation instructions](../README.md) for the target matrix and archive names.
+## Published archives
+
+The workflow is manual and runs only on the default branch. It builds macOS arm64, Linux x86_64 musl, and Linux arm64 musl. It runs `make test-ci` for the macOS build only. It then publishes prerelease `release-<commit-sha>` with `SHA256SUMS` and the two static Linux zips named in the [installation instructions](../README.md). The macOS binary is not attached.

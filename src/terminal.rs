@@ -126,8 +126,7 @@ impl ResizeEvents {
             }
             Ok(_) if descriptors[1].revents().is_empty() => Ok(Wait::Ready),
             Ok(_) => Err(io::Error::other("signalfd stopped reporting SIGWINCH")),
-            // Other signals can still interrupt poll. Redraw and retry, as
-            // the existing terminal loop did for an interrupted wait.
+            // Other signals can still interrupt poll. Redraw and retry.
             Err(Errno::INTR) => Ok(Wait::Interrupted),
             Err(error) => Err(error.into()),
         }

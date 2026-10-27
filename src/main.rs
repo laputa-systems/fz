@@ -180,6 +180,7 @@ fn run(options: Options) -> io::Result<bool> {
 // Rust runtime start-up, which this entry point skips; they would arrive empty.
 pub extern "C" fn main(argc: c_int, argv: *const *const c_char) -> c_int {
     let args = (1..usize::try_from(argc).unwrap_or(0))
+        // SAFETY: the process entry contract is that `argv` holds `argc` non-null C strings, and this range stays below `argc`.
         .map(|index| unsafe { CStr::from_ptr(*argv.add(index)) }.to_bytes().to_vec());
     cli(args)
 }

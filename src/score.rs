@@ -44,8 +44,6 @@ pub(crate) fn find_either(haystack: &[u8], first: u8, second: u8) -> Option<usiz
 pub fn has_match(needle: &[u8], mut haystack: &[u8]) -> bool {
     for &byte in needle {
         let uppercase = byte.to_ascii_uppercase();
-        // Contiguous query prefixes are common. This uses the same accepted
-        // byte pair as `find_either`, without setting up its word scan.
         if let Some((&first, rest)) = haystack.split_first()
             && (first == byte || first == uppercase)
         {

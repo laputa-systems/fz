@@ -6,7 +6,7 @@ Run the Rust suites and the Python PTY acceptance harness with:
 cargo test
 ```
 
-Python 3 is required for the acceptance harness. The Rust tests cover scoring, candidate parsing, ranking, worker behavior, and CLI output. The acceptance harness covers terminal interaction; its differential cases skip when `FZY_ORACLE` is unset.
+Python 3 is required for the acceptance harness. The Rust tests cover scoring, candidate parsing, ranking, worker behavior, and CLI output. The acceptance harness covers terminal interaction. Its differential cases run when `FZY_ORACLE`, `target/upstream/fzy`, or `~/d/fzy/build/fzy` is an executable. Otherwise they skip.
 
 To run the differential cases, build the pinned upstream fzy revision in a disposable copy. The repository's `~/d/fzy` checkout remains read-only:
 
