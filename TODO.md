@@ -1,15 +1,6 @@
 Prefix: FZY
 Next: 4
 
-### FZY-1 · P3 · Differential oracle misses the upstream binary
-
-- **Area:** Tests
-- **Where:** `tests/acceptance.py:303`, `AGENTS.md:13`, upstream fzy `Makefile` target `fzy` (output `./fzy`, not `build/fzy`)
-- **Problem:** `oracle_path` checks `FZY_ORACLE`, then `target/upstream/fzy`, then `~/d/fzy/build/fzy`. Upstream `make` writes `~/d/fzy/fzy`. AGENTS.md names that checkout as the read-only oracle. A built checkout therefore does not enable the differential acceptance cases, and they skip. The explicit `FZY_ORACLE=$PWD/.work/tmp/fzy/fzy` command in `docs/testing.md` still works.
-- **Recommendation:** Look for `~/d/fzy/fzy` (the Makefile output), and keep `FZY_ORACLE` as the override. Do not treat a skip as a passed differential run.
-- **Fix with:** none
-- **Effort:** S
-
 ### FZY-2 · P3 · A failed termios restore is not retried
 
 - **Area:** Operability

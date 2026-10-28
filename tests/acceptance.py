@@ -300,7 +300,12 @@ def oracle_path():
         if not path.is_file() or not os.access(path, os.X_OK):
             raise AssertionError("FZY_ORACLE is set but is not an executable: %s" % path)
         return path
-    for path in (ROOT / "target/upstream/fzy", Path.home() / "d/fzy/build/fzy"):
+    candidates = (
+        ROOT / "target/upstream/fzy",
+        Path.home() / "d/fzy/fzy",
+        Path.home() / "d/fzy/build/fzy",
+    )
+    for path in candidates:
         if path.is_file() and os.access(path, os.X_OK):
             return path
     return None
@@ -687,7 +692,7 @@ class Acceptance(unittest.TestCase):
     def test_differential_noninteractive_scores_and_ranks(self):
         oracle = oracle_path()
         if oracle is None:
-            self.skipTest("differential oracle unavailable (set FZY_ORACLE or build target/upstream/fzy)")
+            self.skipTest("differential oracle unavailable (set FZY_ORACLE, or build target/upstream/fzy or ~/d/fzy/fzy)")
         data, queries = deterministic_fixtures()
         for query in queries:
             ours = run_fz(("-e", query, "-s"), data)
@@ -701,7 +706,7 @@ class Acceptance(unittest.TestCase):
     def test_differential_interactive_key_outcomes(self):
         oracle = oracle_path()
         if oracle is None:
-            self.skipTest("differential oracle unavailable (set FZY_ORACLE or build target/upstream/fzy)")
+            self.skipTest("differential oracle unavailable (set FZY_ORACLE, or build target/upstream/fzy or ~/d/fzy/fzy)")
         cases = (
             (b"foo\nbar\n", (), b"foo\r"),
             (b"foo\nbar\n", (), b"\x1b[A\r"),
