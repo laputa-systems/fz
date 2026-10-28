@@ -452,7 +452,7 @@ fn next_constructive_property_case(state: &mut u64) -> (Vec<u8>, Vec<u8>) {
 
 #[test]
 fn property_nonempty_eligible_matches_have_a_score() {
-    let mut state = 0xa600_d16b_175e_ed_u64;
+    let mut state = 0x00a6_00d1_6b17_5eed_u64;
 
     for case in 0..100_000 {
         let needle = next_property_string(&mut state);
@@ -478,7 +478,7 @@ fn property_nonempty_eligible_matches_have_a_score() {
 
 #[test]
 fn property_positions_are_increasing_and_identify_the_eligible_bytes() {
-    let mut state = 0xa600_d16b_175e_ed_u64;
+    let mut state = 0x00a6_00d1_6b17_5eed_u64;
 
     for case in 0..100_000 {
         let needle = next_property_string(&mut state);

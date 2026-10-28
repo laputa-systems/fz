@@ -23,9 +23,9 @@ fn zero_byte_mask(word: u64) -> u64 {
 pub(crate) fn find_either(haystack: &[u8], first: u8, second: u8) -> Option<usize> {
     let first_word = u64::from(first) * BYTE_WORD_ONES;
     let second_word = u64::from(second) * BYTE_WORD_ONES;
-    let mut words = haystack.chunks_exact(8);
-    for (index, chunk) in (&mut words).enumerate() {
-        let word = u64::from_le_bytes(chunk.try_into().unwrap());
+    let (words, remainder) = haystack.as_chunks::<8>();
+    for (index, chunk) in words.iter().enumerate() {
+        let word = u64::from_le_bytes(*chunk);
         let mut matches = zero_byte_mask(word ^ first_word);
         if second != first {
             matches |= zero_byte_mask(word ^ second_word);
@@ -34,8 +34,8 @@ pub(crate) fn find_either(haystack: &[u8], first: u8, second: u8) -> Option<usiz
             return Some(index * 8 + matches.trailing_zeros() as usize / 8);
         }
     }
-    let offset = haystack.len() - words.remainder().len();
-    words.remainder().iter().position(|&ch| ch == first || ch == second).map(|index| offset + index)
+    let offset = haystack.len() - remainder.len();
+    remainder.iter().position(|&ch| ch == first || ch == second).map(|index| offset + index)
 }
 
 /// Subsequence eligibility follows fzy's asymmetric ASCII rule: a lowercase
