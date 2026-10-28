@@ -628,9 +628,21 @@ impl Terminal {
 
     fn restore(&mut self) -> io::Result<()> {
         let termios_result = if self.restore_needed {
-            self.restore_needed = false;
-            termios::tcsetattr(&self.input, OptionalActions::Now, &self.original)
-                .map_err(io::Error::from)
+            loop {
+                match termios::tcsetattr(&self.input, OptionalActions::Now, &self.original) {
+                    Ok(()) => {
+                        self.restore_needed = false;
+                        break Ok(());
+                    }
+                    Err(error) => {
+                        let error = io::Error::from(error);
+                        if error.kind() == io::ErrorKind::Interrupted {
+                            continue;
+                        }
+                        break Err(error);
+                    }
+                }
+            }
         } else {
             Ok(())
         };

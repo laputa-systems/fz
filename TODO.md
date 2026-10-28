@@ -1,15 +1,6 @@
 Prefix: FZY
 Next: 4
 
-### FZY-2 · P3 · A failed termios restore is not retried
-
-- **Area:** Operability
-- **Where:** `src/terminal.rs:631`
-- **Problem:** `Terminal::restore` sets `restore_needed` to false before `tcsetattr` returns. On failure, `Drop` calls `restore` again and skips the termios write, so the tty stays raw while the process exits. The Linux signal-mask path does retry: `ResizeEvents::restore` puts the saved mask back when `pthread_sigmask` fails (`src/terminal.rs:167`). This is the code path only. A live `tcsetattr` failure was not reproduced.
-- **Recommendation:** Clear `restore_needed` only after `tcsetattr` succeeds, and retry `EINTR`. Leave the mask retry as it is.
-- **Fix with:** none
-- **Effort:** S
-
 ### FZY-3 · P4 · `make lint` rewrites the tree
 
 - **Area:** Build
