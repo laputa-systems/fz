@@ -15,14 +15,25 @@ defaults:
   run:
     shell: bash -euo pipefail {0}
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     name: CI (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-26]
+        include:
+          - os: ubuntu-latest
+            toolchain: nightly-2026-09-15
+          - os: macos-26
+            toolchain: stable
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
     permissions:
       contents: read
     defaults:
