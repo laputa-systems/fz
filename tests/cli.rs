@@ -70,6 +70,14 @@ fn multi_and_noninteractive_filter_are_incompatible() {
 }
 
 #[test]
+fn multi_reports_terminal_errors_separately_from_cancellation() {
+    let result = run(&["--multi", "--tty", "/definitely/missing/fz-tty"], b"foo\n");
+    assert_eq!(result.status.code(), Some(2));
+    assert!(result.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("fz:"));
+}
+
+#[test]
 fn help_and_version_do_not_require_a_terminal() {
     let help = run(&["--help"], b"");
     assert!(help.status.success());

@@ -72,7 +72,9 @@ printable character in the result list also returns to query editing.
 The selected count is always visible; marks persist when the query changes.
 **Enter** outputs every marked result in marking order, one line per result.
 With no marks, Enter accepts the focused result as usual; with no matches
-it outputs nothing and exits with status 1. **Esc** cancels without output.
+it outputs nothing and exits with status 1. **Esc** cancels without output
+(status 1). Terminal or I/O failures in multi-select mode return status 2;
+a terminal too small to display selectable rows cannot accept a selection.
 Space in query editing still inserts a space. This mode is opt-in; ordinary
 single-selection fz behavior remains unchanged.
 

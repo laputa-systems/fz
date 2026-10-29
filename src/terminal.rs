@@ -346,6 +346,9 @@ impl Terminal {
             .lines
             .min(candidates.len())
             .min(height.saturating_sub(reserved_rows));
+        if options.multi && lines == 0 && !candidates.is_empty() {
+            return Err(io::Error::other("terminal too small for multi-select results"));
+        }
         let mut state = Editor::new(options.query.clone(), lines, options.multi);
         let mut choices = fz::Choices::from_candidates(candidates);
         choices.set_workers(options.workers);

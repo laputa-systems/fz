@@ -201,12 +201,15 @@ pub unsafe extern "C" fn main(argc: c_int, argv: *const *const c_char) -> c_int 
 fn cli(args: impl Iterator<Item = Vec<u8>>) -> c_int {
     match Options::parse(args) {
         Ok(None) => 0,
-        Ok(Some(options)) => match run(options) {
-            Ok(true) => 0,
-            Ok(false) => 1,
-            Err(error) => {
-                eprintln!("fz: {error}");
-                1
+        Ok(Some(options)) => {
+            let multi = options.multi;
+            match run(options) {
+                Ok(true) => 0,
+                Ok(false) => 1,
+                Err(error) => {
+                    eprintln!("fz: {error}");
+                    if multi { 2 } else { 1 }
+                }
             }
         },
         Err(error) => {

@@ -776,6 +776,16 @@ class MultiSelectionTests(unittest.TestCase):
             finally:
                 session.close()
 
+    def test_tiny_terminal_rejects_invisible_selection(self):
+        session = PtyFz(b"one\ntwo\n", ("--multi",), rows=2)
+        try:
+            code, out, err = session.finish()
+            self.assertEqual((code, out), (2, b""))
+            self.assertIn(b"terminal too small", err)
+            self.assertTrue(session.restored())
+        finally:
+            session.close()
+
     def test_duplicate_lines_can_be_marked_independently(self):
         session = PtyFz(b"same\nsame\n", ("--multi",))
         try:
