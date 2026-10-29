@@ -8,16 +8,12 @@ on:
 permissions: {}
 
 concurrency:
-  group: "${{ github.workflow }}-${{ github.head_ref || github.run_id }}"
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 defaults:
   run:
     shell: bash -euo pipefail {0}
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   ci:
