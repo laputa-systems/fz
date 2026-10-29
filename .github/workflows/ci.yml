@@ -17,8 +17,12 @@ defaults:
 
 jobs:
   ci:
-    name: CI
-    runs-on: ubuntu-latest
+    name: CI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-26]
     permissions:
       contents: read
     defaults:

@@ -781,10 +781,10 @@ class MultiSelectionTests(unittest.TestCase):
         try:
             session.wait_for_output()
             session.send(b"\x1b[B ")
-            session.wait_for_lines(["> ", "[2/2] [1 selected]",
+            session.wait_for_lines([">", "[2/2] [1 selected]",
                                     "[x] same", "[ ] same"])
             session.send(b"\x1b[B ")
-            session.wait_for_lines(["> ", "[2/2] [2 selected]",
+            session.wait_for_lines([">", "[2/2] [2 selected]",
                                     "[x] same", "[x] same"])
             self.assertEqual(session.finish(b"\r"), (0, b"same\nsame\n", b""))
         finally:
