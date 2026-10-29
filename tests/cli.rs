@@ -62,6 +62,14 @@ fn invalid_lines_and_positional_arguments_fail_without_stdout() {
 }
 
 #[test]
+fn multi_and_noninteractive_filter_are_incompatible() {
+    let result = run(&["--multi", "--show-matches=x"], b"x\n");
+    assert_eq!(result.status.code(), Some(1));
+    assert!(result.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("cannot be combined"));
+}
+
+#[test]
 fn help_and_version_do_not_require_a_terminal() {
     let help = run(&["--help"], b"");
     assert!(help.status.success());

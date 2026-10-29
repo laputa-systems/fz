@@ -54,11 +54,30 @@ This prints matching candidates in score order and exits with status 0, includin
 | `-0`, `--read-null` | Read NUL-separated candidates |
 | `-j`, `--workers=NUM` | Maximum workers (default up to four; small searches use one) |
 | `-i`, `--show-info` | Show the match count |
+| `-m`, `--multi` | Mark multiple results with Space, then accept with Enter |
 | `-h`, `--help` | Show help |
 | `-v`, `--version` | Show version |
 
 Up/Down or Ctrl-P/N (also Ctrl-K/J) moves through results. Left/Right, Home/End, and Ctrl-A/E move the query cursor. Backspace deletes a character, Ctrl-W deletes the preceding word, Ctrl-U deletes before the cursor, Tab completes the selected candidate, and PageUp/PageDown moves by a page.
 
 Matching follows fzy's byte-oriented behavior: lowercase ASCII query letters match either case, uppercase letters match uppercase only, and non-ASCII bytes match exactly. Query editing moves by UTF-8 code point; matching does not normalize or case-fold Unicode.
+
+### Multi-select
+
+Use `fz --multi --query=needle` to mark multiple candidates in one terminal session.
+Type to filter, then press **Down** to focus the first result. In the result list,
+**Space** marks or unmarks the focused row, and Up/Down moves between rows.
+**Up** from the first result returns to query editing. Typing any non-space
+printable character in the result list also returns to query editing.
+The selected count is always visible; marks persist when the query changes.
+**Enter** outputs every marked result in marking order, one line per result.
+With no marks, Enter accepts the focused result as usual; with no matches
+it outputs nothing and exits with status 1. **Esc** cancels without output.
+Space in query editing still inserts a space. This mode is opt-in; ordinary
+single-selection fz behavior remains unchanged.
+
+Multi-select output is newline-delimited, like normal interactive output.
+Avoid `--read-null` with embedded-newline records if the consumer needs
+unambiguous output boundaries. `--multi` cannot be combined with `--show-matches`.
 
 For help, use `fz --help` or visit the [issue tracker](https://github.com/laputa-systems/fz/issues). The project is MIT licensed; see [LICENSE](LICENSE).

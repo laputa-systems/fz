@@ -22,6 +22,7 @@ struct Options {
     tty: Cow<'static, Path>,
     show_scores: bool,
     show_info: bool,
+    multi: bool,
     filter: Option<Vec<u8>>,
     delimiter: u8,
     workers: usize,
@@ -37,6 +38,7 @@ const HELP: &str = "Usage: fz [OPTION]...
  -0, --read-null          Read NUL-delimited candidates
  -j, --workers=NUM        Maximum workers (default up to 4; small searches use 1)
  -i, --show-info          Show match count
+ -m, --multi               Mark multiple candidates (Down, Space, Enter)
  -h, --help              Display this help
  -v, --version           Display version
 ";
@@ -46,7 +48,7 @@ impl Options {
         let mut options = Self {
             lines: 10, prompt: Cow::Borrowed(b"> "), query: Vec::new(),
             tty: Cow::Borrowed(Path::new("/dev/tty")), show_scores: false, show_info: false,
-            filter: None, delimiter: b'\n', workers: 0,
+            multi: false, filter: None, delimiter: b'\n', workers: 0,
         };
         while let Some(arg) = args.next() {
             if arg == b"--" {
@@ -63,6 +65,7 @@ impl Options {
                     b"lines" => b'l', b"prompt" => b'p', b"query" => b'q',
                     b"show-matches" => b'e', b"tty" => b't', b"show-scores" => b's',
                     b"read-null" => b'0', b"workers" => b'j', b"show-info" => b'i',
+                    b"multi" => b'm',
                     b"help" => b'h', b"version" => b'v', _ => b'?',
                 };
                 (&[long_key][..], (end < long.len()).then(|| &long[end + 1..]))
@@ -108,6 +111,7 @@ impl Options {
                     b's' => options.show_scores = true,
                     b'0' => options.delimiter = 0,
                     b'i' => options.show_info = true,
+                    b'm' => options.multi = true,
                     b'v' => {
                         println!("fz {} (fzy port; © 2014-2025 John Hawthorn)", env!("CARGO_PKG_VERSION"));
                         return Ok(None);
@@ -118,6 +122,9 @@ impl Options {
                     }
                 }
             }
+        }
+        if options.multi && options.filter.is_some() {
+            return Err("--multi cannot be combined with --show-matches".into());
         }
         Ok(Some(options))
     }

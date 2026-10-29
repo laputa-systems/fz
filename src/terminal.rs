@@ -340,12 +340,13 @@ impl Terminal {
         }
 
         let (_, height) = self.dimensions();
-        let reserved_rows = 1usize + usize::from(options.show_info);
+        let show_info = options.show_info || options.multi;
+        let reserved_rows = 1usize + usize::from(show_info);
         let lines = options
             .lines
             .min(candidates.len())
             .min(height.saturating_sub(reserved_rows));
-        let mut state = Editor::new(options.query.clone(), lines);
+        let mut state = Editor::new(options.query.clone(), lines, options.multi);
         let mut choices = fz::Choices::from_candidates(candidates);
         choices.set_workers(options.workers);
         // On Linux, `Terminal::open` already blocked SIGWINCH. Any search
@@ -375,8 +376,8 @@ impl Terminal {
                 InputResult::Continue { search_changed } => {
                     state.search_dirty |= search_changed;
                 }
-                InputResult::Accept => return self.finish(&mut state, &mut choices, options.show_info),
-                InputResult::Cancel => return self.cancel(&state, options.show_info),
+                InputResult::Accept => return self.finish(&mut state, &mut choices, show_info),
+                InputResult::Cancel => return self.cancel(&state, show_info),
             }
             // Drain already queued typing before ranking and drawing. fzy also
             // searches once per input batch; actions that consume the selection
@@ -396,13 +397,23 @@ impl Terminal {
         choices: &mut fz::Choices,
         show_info: bool,
     ) -> io::Result<Option<Vec<u8>>> {
-        let selection = choices
-            .selected()
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| mem::take(&mut state.query));
+        let selection = if state.multi && !state.marked.is_empty() {
+            let mut output = Vec::new();
+            for (index, &source) in state.marked.iter().enumerate() {
+                if index > 0 { output.push(b'\n'); }
+                output.extend_from_slice(choices.source(source).expect("marked source exists"));
+            }
+            Some(output)
+        } else if state.multi && choices.available() == 0 {
+            // Multi-mode never echoes an unmatched query as a selection.
+            None
+        } else {
+            Some(choices.selected().map(ToOwned::to_owned)
+                .unwrap_or_else(|| mem::take(&mut state.query)))
+        };
         self.clear(state.lines, show_info)?;
         self.restore()?;
-        Ok(Some(selection))
+        Ok(selection)
     }
 
     fn cancel(&mut self, state: &Editor, show_info: bool) -> io::Result<Option<Vec<u8>>> {
@@ -421,6 +432,21 @@ impl Terminal {
         state.ambiguous_key_pending = false;
         if let Some(byte) = byte {
             state.input.push(byte);
+        }
+
+        // Space only marks a candidate after Down has moved focus into the list.
+        // In the query, it remains an ordinary search character.
+        if state.multi && state.focus_list && state.input == b" " {
+            state.input.clear();
+            state.update_choices(choices);
+            if let Some(source) = choices.source_index(choices.selection()) {
+                if let Some(index) = state.marked.iter().position(|&id| id == source) {
+                    state.marked.remove(index);
+                } else {
+                    state.marked.push(source);
+                }
+            }
+            return InputResult::Continue { search_changed: false };
         }
 
         let mut matching_action = None;
@@ -452,6 +478,11 @@ impl Terminal {
             };
         }
 
+        // Typing while navigating results returns to query editing; previously
+        // marked input identities survive re-filtering.
+        if state.multi && state.focus_list {
+            state.focus_list = false;
+        }
         let mut search_changed = false;
         for index in 0..state.input.len() {
             let byte = state.input[index];
@@ -475,23 +506,46 @@ impl Terminal {
         let changed = match action {
             Action::Cancel => return InputResult::Cancel,
             Action::Accept => return InputResult::Accept,
-            Action::DeleteCharacter => state.delete_character(),
-            Action::DeleteWord => state.delete_word(),
-            Action::DeleteToBeginning => state.delete_to_beginning(),
-            Action::Complete => choices.selected().is_some_and(|candidate| state.replace(candidate)),
-            Action::Previous => { choices.prev(); false }
-            Action::Next => { choices.next(); false }
-            Action::Left => { state.left(); false }
-            Action::Right => { state.right(); false }
-            Action::Beginning => { state.cursor = 0; false }
-            Action::End => { state.cursor = state.query.len(); false }
+            Action::DeleteCharacter => { state.focus_list = false; state.delete_character() }
+            Action::DeleteWord => { state.focus_list = false; state.delete_word() }
+            Action::DeleteToBeginning => { state.focus_list = false; state.delete_to_beginning() }
+            Action::Complete => {
+                state.focus_list = false;
+                choices.selected().is_some_and(|candidate| state.replace(candidate))
+            }
+            Action::Previous => {
+                if state.multi {
+                    if state.focus_list {
+                        if choices.selection() == 0 { state.focus_list = false; }
+                        else { choices.prev(); }
+                    }
+                } else { choices.prev(); }
+                false
+            }
+            Action::Next => {
+                if state.multi && !state.focus_list {
+                    state.focus_list = choices.available() > 0;
+                } else { choices.next(); }
+                false
+            }
+            Action::Left => { state.focus_list = false; state.left(); false }
+            Action::Right => { state.focus_list = false; state.right(); false }
+            Action::Beginning => { state.focus_list = false; state.cursor = 0; false }
+            Action::End => { state.focus_list = false; state.cursor = state.query.len(); false }
             Action::PageUp => {
-                for _ in 0..state.lines.min(choices.selection()) { choices.prev(); }
+                if !state.multi || state.focus_list {
+                    for _ in 0..state.lines.min(choices.selection()) { choices.prev(); }
+                    if state.multi && choices.selection() == 0 { state.focus_list = false; }
+                }
                 false
             }
             Action::PageDown => {
-                let remaining = choices.available().saturating_sub(choices.selection() + 1);
-                for _ in 0..state.lines.min(remaining) { choices.next(); }
+                if state.multi && !state.focus_list {
+                    state.focus_list = choices.available() > 0;
+                } else {
+                    let remaining = choices.available().saturating_sub(choices.selection() + 1);
+                    for _ in 0..state.lines.min(remaining) { choices.next(); }
+                }
                 false
             }
             Action::Ignore => false,
@@ -520,12 +574,17 @@ impl Terminal {
         self.write_bytes(&state.query)?;
         self.clear_line()?;
 
-        if options.show_info {
+        if options.show_info || options.multi {
             self.write_bytes(b"\n[")?;
             self.write_usize(available)?;
             self.write_bytes(b"/")?;
             self.write_usize(choices.len())?;
             self.write_bytes(b"]")?;
+            if options.multi {
+                self.write_bytes(b" [")?;
+                self.write_usize(state.marked.len())?;
+                self.write_bytes(b" selected]")?;
+            }
             self.clear_line()?;
         }
 
@@ -533,12 +592,16 @@ impl Terminal {
             self.write_bytes(b"\n")?;
             self.clear_line()?;
             let score = options.show_scores.then(|| choices.getscore(index)).flatten();
+            let marked = options.multi && choices.source_index(index)
+                .is_some_and(|source| state.marked.contains(&source));
             if let Some(candidate) = choices.get(index) {
-                self.draw_candidate(candidate, state, score, index == selection)?;
+                self.draw_candidate(candidate, state, score,
+                    index == selection && (!options.multi || state.focus_list),
+                    options.multi, marked)?;
             }
         }
 
-        let result_rows = state.lines + usize::from(options.show_info);
+        let result_rows = state.lines + usize::from(options.show_info || options.multi);
         if result_rows > 0 {
             self.move_up(result_rows)?;
         }
@@ -554,7 +617,13 @@ impl Terminal {
         state: &Editor,
         score: Option<f64>,
         selected: bool,
+        multi: bool,
+        marked: bool,
     ) -> io::Result<()> {
+        if selected { self.set_invert()?; }
+        if multi {
+            self.write_bytes(if marked { b"[x] " } else { b"[ ] " })?;
+        }
         if let Some(score) = score {
             if score == f64::NEG_INFINITY {
                 self.write_bytes(b"(     ) ")?;
@@ -563,9 +632,6 @@ impl Terminal {
             }
         }
 
-        if selected {
-            self.set_invert()?;
-        }
         self.set_nowrap()?;
 
         let positions = fz::match_positions(&state.query, candidate).unwrap_or_default();
@@ -780,6 +846,9 @@ enum InputResult {
 struct Editor {
     query: Vec<u8>,
     cursor: usize,
+    multi: bool,
+    focus_list: bool,
+    marked: Vec<usize>,
     input: Vec<u8>,
     ambiguous_key_pending: bool,
     search_dirty: bool,
@@ -787,12 +856,15 @@ struct Editor {
 }
 
 impl Editor {
-    fn new(mut query: Vec<u8>, lines: usize) -> Self {
+    fn new(mut query: Vec<u8>, lines: usize, multi: bool) -> Self {
         query.truncate(4096);
         let cursor = query.len();
         Self {
             query,
             cursor,
+            multi,
+            focus_list: false,
+            marked: Vec::new(),
             input: Vec::new(),
             ambiguous_key_pending: false,
             search_dirty: false,

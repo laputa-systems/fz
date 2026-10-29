@@ -153,13 +153,20 @@ impl Choices {
         }
     }
 
+    /// Stable input identity for a ranked candidate, independent of query changes.
+    pub fn source_index(&mut self, index: usize) -> Option<usize> {
+        if self.all { return (index < self.candidates.len()).then_some(index); }
+        if index >= self.results.len() { return None; }
+        self.rank_through(index + 1);
+        Some(self.results[index].0)
+    }
+
+    /// Access a candidate in original input order (also distinguishes duplicates).
+    pub fn source(&self, index: usize) -> Option<&[u8]> { self.candidates.get(index) }
+
     pub fn get(&mut self, index: usize) -> Option<&[u8]> {
-        let candidate = if self.all { index } else {
-            if index >= self.results.len() { return None; }
-            self.rank_through(index + 1);
-            self.results[index].0
-        };
-        self.candidates.get(candidate)
+        let source = self.source_index(index)?;
+        self.source(source)
     }
 
     pub fn getscore(&mut self, index: usize) -> Option<f64> {

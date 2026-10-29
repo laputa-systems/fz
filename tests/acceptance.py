@@ -722,5 +722,74 @@ class Acceptance(unittest.TestCase):
             self.assertTrue(ours[3], "fz did not restore termios after %r" % (keys,))
 
 
+class MultiSelectionTests(unittest.TestCase):
+    def test_mark_toggle_and_batch_output(self):
+        session = PtyFz(b"alpha one\nalpha two\nbeta\n", ("--multi", "--query=alpha"))
+        try:
+            session.wait_for_lines(["> alpha", "[2/3] [0 selected]",
+                                    "[ ] alpha one", "[ ] alpha two"])
+            session.send(b"\x1b[B ")  # Down enters list; Space marks first.
+            session.wait_for_lines(["> alpha", "[2/3] [1 selected]",
+                                    "[x] alpha one", "[ ] alpha two"])
+            session.send(b"\x1b[B ")  # Down to second; mark it.
+            session.wait_for_lines(["> alpha", "[2/3] [2 selected]",
+                                    "[x] alpha one", "[x] alpha two"])
+            session.send(b" ")  # Same row, so Space deselects it.
+            session.wait_for_lines(["> alpha", "[2/3] [1 selected]",
+                                    "[x] alpha one", "[ ] alpha two"])
+            code, out, err = session.finish(b"\r")
+            self.assertEqual((code, out, err), (0, b"alpha one\n", b""))
+            self.assertTrue(session.restored())
+        finally:
+            session.close()
+
+    def test_marks_survive_refiltering_and_query_space_is_text(self):
+        session = PtyFz(b"alpha one\nalpha two\nbeta\n", ("-m", "--query=alpha"))
+        try:
+            session.wait_for_output()
+            session.send(b"\x1b[B ")  # Mark alpha one.
+            session.wait_for_lines(["> alpha", "[2/3] [1 selected]",
+                                    "[x] alpha one", "[ ] alpha two"])
+            session.send(b"\x1b[A")  # Up from first returns to query.
+            session.send(b" one")  # Space must edit the query, not toggle.
+            session.wait_for_lines(["> alpha one", "[1/3] [1 selected]",
+                                    "[x] alpha one"])
+            session.send(b"\x15beta")  # Ctrl-U, then a different query.
+            session.wait_for_lines(["> beta", "[1/3] [1 selected]", "[ ] beta"])
+            session.send(b"\x1b[B ")  # Mark beta.
+            session.wait_for_lines(["> beta", "[1/3] [2 selected]", "[x] beta"])
+            code, out, err = session.finish(b"\r")
+            self.assertEqual((code, out, err), (0, b"alpha one\nbeta\n", b""))
+        finally:
+            session.close()
+
+    def test_unmarked_enter_cancel_and_no_match(self):
+        for candidates, args, keys, expected in (
+            (b"one\ntwo\n", ("--multi",), b"\r", (0, b"one\n", b"")),
+            (b"one\ntwo\n", ("--multi",), b"\x1b[B \x1b", (1, b"", b"")),
+            (b"one\ntwo\n", ("--multi", "--query=missing"), b"\r", (1, b"", b"")),
+        ):
+            session = PtyFz(candidates, args)
+            try:
+                session.wait_for_output()
+                self.assertEqual(session.finish(keys), expected)
+            finally:
+                session.close()
+
+    def test_duplicate_lines_can_be_marked_independently(self):
+        session = PtyFz(b"same\nsame\n", ("--multi",))
+        try:
+            session.wait_for_output()
+            session.send(b"\x1b[B ")
+            session.wait_for_lines(["> ", "[2/2] [1 selected]",
+                                    "[x] same", "[ ] same"])
+            session.send(b"\x1b[B ")
+            session.wait_for_lines(["> ", "[2/2] [2 selected]",
+                                    "[x] same", "[x] same"])
+            self.assertEqual(session.finish(b"\r"), (0, b"same\nsame\n", b""))
+        finally:
+            session.close()
+
+
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]], verbosity=2)
