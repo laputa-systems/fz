@@ -15,6 +15,7 @@ use rustix::{
 #[cfg(target_os = "macos")]
 use rustix::{
     event::kqueue::{self, Event, EventFilter, EventFlags},
+    io::Errno,
     process::Signal,
 };
 use rustix::termios::{self, InputModes, LocalModes, OptionalActions, Termios};
@@ -28,7 +29,7 @@ use std::mem::MaybeUninit;
 #[cfg(target_os = "linux")]
 use std::os::fd::{FromRawFd, OwnedFd};
 #[cfg(target_os = "macos")]
-use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::path::Path;
 #[cfg(target_os = "linux")]
 use std::rc::Rc;
@@ -211,66 +212,61 @@ fn restore_signal_mask(mask: &libc::sigset_t) -> io::Result<()> {
 
 #[cfg(target_os = "macos")]
 impl ResizeEvents {
-    fn install(input: &File) -> io::Result<Self> {
+    fn install(_: &File) -> io::Result<Self> {
         let queue = kqueue::kqueue()?;
-        let receipt_flags = EventFlags::ADD | EventFlags::RECEIPT;
+        // Only resize delivery is registered here. An EVFILT_READ entry for
+        // the tty reports the line discipline's pending input state in
+        // `data` and would turn a nonzero `data` into a spurious failure in
+        // any result check; the queue fd joins the input fd in the wait
+        // loop's poll set instead, so no read filter is needed.
         let changes = [
-            Event::new(
-                EventFilter::Read(input.as_raw_fd()),
-                receipt_flags,
-                std::ptr::null_mut(),
-            ),
             Event::new(
                 EventFilter::Signal {
                     signal: Signal::WINCH,
                     times: 0,
                 },
-                receipt_flags | EventFlags::CLEAR,
+                EventFlags::ADD | EventFlags::CLEAR,
                 std::ptr::null_mut(),
             ),
         ];
-        let mut receipts = [MaybeUninit::uninit(); 2];
-        // SAFETY: `Terminal` owns `input` for longer than this queue; its
-        // field order drops the queue before the descriptor it registered.
-        let (receipts, _) = unsafe { kqueue::kevent(&queue, &changes, &mut receipts, None)? };
-        for receipt in receipts {
-            if receipt.flags().contains(EventFlags::ERROR) && receipt.data() != 0 {
-                return Err(io::Error::from_raw_os_error(receipt.data() as i32));
-            }
-        }
+        let mut events = [MaybeUninit::uninit(); 1];
+        // SAFETY: the queue outlives this call and the buffer holds the
+        // single registered signal filter's state.
+        let _ = unsafe {
+            kqueue::kevent(&queue, &changes, &mut events, Some(Duration::ZERO))?
+        };
         Ok(Self { queue })
     }
 
     fn wait_for_input(&self, input: &File, timeout: Option<Duration>) -> io::Result<Wait> {
-        let mut events = [MaybeUninit::uninit(); 2];
-        // SAFETY: `input` remains valid for the queue's full lifetime; see
-        // `install` and the `Terminal` field-order invariant above.
-        let (events, _) = unsafe { kqueue::kevent(&self.queue, &[], &mut events, timeout)? };
-        for event in events.iter() {
-            if event.flags().contains(EventFlags::ERROR) && event.data() != 0 {
-                return Err(io::Error::from_raw_os_error(event.data() as i32));
+        use rustix::event::{PollFd, PollFlags, Timespec};
+        let timeout = timeout.map(|timeout| {
+            Timespec::try_from(timeout).expect("the fixed escape timeout fits in a timespec")
+        });
+        let mut descriptors = [
+            PollFd::new(&self.queue, PollFlags::IN),
+            PollFd::new(input, PollFlags::IN),
+        ];
+        match rustix::event::poll(&mut descriptors, timeout.as_ref()) {
+            Ok(0) => Ok(Wait::TimedOut),
+            Ok(_) if descriptors[0].revents().contains(PollFlags::IN) => {
+                let mut events = [MaybeUninit::uninit(); 1];
+                // SAFETY: the queue outlives this call and the buffer is
+                // sized for the single registered signal filter.
+                let (events, _) =
+                    unsafe { kqueue::kevent(&self.queue, &[], &mut events, Some(Duration::ZERO))? };
+                for event in events.iter() {
+                    if event.flags().contains(EventFlags::ERROR) && event.data() != 0 {
+                        return Err(io::Error::from_raw_os_error(event.data() as i32));
+                    }
+                }
+                // Input may be ready too. Redraw first; it stays readable for
+                // the next iteration, which preserves the resize transition.
+                Ok(Wait::Interrupted)
             }
-        }
-        if events.iter().any(|event| {
-            matches!(
-                event.filter(),
-                EventFilter::Signal { signal, .. } if signal == Signal::WINCH
-            )
-        }) {
-            return Ok(Wait::Interrupted);
-        }
-        if events.iter().any(|event| {
-            matches!(
-                event.filter(),
-                EventFilter::Read(fd) if fd == input.as_raw_fd()
-            )
-        }) {
-            return Ok(Wait::Ready);
-        }
-        if events.is_empty() {
-            Ok(Wait::TimedOut)
-        } else {
-            Ok(Wait::Interrupted)
+            Ok(_) => Ok(Wait::Ready),
+            Err(Errno::INTR) => Ok(Wait::Interrupted),
+            Err(error) => Err(error.into()),
         }
     }
 
