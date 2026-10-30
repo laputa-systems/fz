@@ -13,7 +13,7 @@ libc = "0.2"
 
 [dev-dependencies]
 rustybench = "0.1"
-laputa-ptytest = { path = "../ptytest" }
+laputa-ptytest = "0.3"
 
 [[bench]]
 name = "bench"
