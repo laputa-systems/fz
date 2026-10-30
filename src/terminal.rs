@@ -239,17 +239,25 @@ impl ResizeEvents {
     }
 
     fn wait_for_input(&self, input: &File, timeout: Option<Duration>) -> io::Result<Wait> {
-        use rustix::event::{PollFd, PollFlags, Timespec};
+        // macOS poll reports POLLNVAL for /dev/tty, the default terminal
+        // device, so wait with select, which handles it. The queue fd joins
+        // the tty fd in the read set instead of a poll set.
+        use rustix::event::{FdSetElement, Timespec, fd_set_insert, fd_set_num_elements, select, FdSetIter};
+        use std::os::fd::{AsFd, AsRawFd};
+        let queue = self.queue.as_fd().as_raw_fd();
+        let tty = input.as_fd().as_raw_fd();
+        let nfds = queue.max(tty) + 1;
         let timeout = timeout.map(|timeout| {
             Timespec::try_from(timeout).expect("the fixed escape timeout fits in a timespec")
         });
-        let mut descriptors = [
-            PollFd::new(&self.queue, PollFlags::IN),
-            PollFd::new(input, PollFlags::IN),
-        ];
-        match rustix::event::poll(&mut descriptors, timeout.as_ref()) {
+        let mut readfds = vec![FdSetElement::default(); fd_set_num_elements(2, nfds)];
+        fd_set_insert(&mut readfds, queue);
+        fd_set_insert(&mut readfds, tty);
+        // SAFETY: both descriptors are owned by this terminal and stay open
+        // for the call; the set fits every inserted descriptor.
+        match unsafe { select(nfds, Some(&mut readfds), None, None, timeout.as_ref()) } {
             Ok(0) => Ok(Wait::TimedOut),
-            Ok(_) if descriptors[0].revents().contains(PollFlags::IN) => {
+            Ok(_) if FdSetIter::new(&readfds).any(|fd| fd == queue) => {
                 let mut events = [MaybeUninit::uninit(); 1];
                 // SAFETY: the queue outlives this call and the buffer is
                 // sized for the single registered signal filter.
