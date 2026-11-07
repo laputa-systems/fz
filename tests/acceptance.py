@@ -563,7 +563,17 @@ class Acceptance(unittest.TestCase):
         ascii_value = "LongStringOfText" * 6
         unicode_value = "ＬｏｎｇＳｔｒｉｎｇＯｆＴｅｘｔ" * 3
         session = self.session((ascii_value + "\n" + unicode_value + "\n").encode())
-        session.wait_for_lines([">", ascii_value[:80], unicode_value[:40]])
+        session.wait_for_lines([">", ascii_value[:80], ascii_value[80:],
+                                unicode_value[:40], unicode_value[40:]])
+        self.assert_exit(session, b"\x03", 1, b"")
+
+    def test_long_candidates_wrap_on_narrow_terminals(self):
+        session = self.session(b"0123456789ABCDEFGHIJ\nshort\n", cols=10)
+        session.wait_for_lines([">", "0123456789", "ABCDEFGHIJ", "short"])
+        self.assert_exit(session, b"\r", 0, b"0123456789ABCDEFGHIJ\n")
+
+        session = self.session(b"0123456789ABCDEFGHIJ\nabcdefghij\nklmnopqrst\n", ("-l3",), cols=10)
+        session.wait_for_lines([">", "0123456789", "ABCDEFGHIJ", "abcdefghij"])
         self.assert_exit(session, b"\x03", 1, b"")
 
     def test_unicode_editing_and_cursor_columns(self):

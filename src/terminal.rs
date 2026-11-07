@@ -348,7 +348,6 @@ impl Terminal {
         let reserved_rows = 1usize + usize::from(show_info);
         let lines = options
             .lines
-            .min(candidates.len())
             .min(height.saturating_sub(reserved_rows));
         if options.multi && lines == 0 && !candidates.is_empty() {
             return Err(io::Error::other("terminal too small for multi-select results"));
@@ -595,17 +594,41 @@ impl Terminal {
             self.clear_line()?;
         }
 
-        for index in start..start.saturating_add(state.lines) {
+        let width = self.dimensions().0;
+        let budget = state.lines;
+        let prefix_width = usize::from(options.multi) * 4 + usize::from(options.show_scores) * 8;
+        let mut end = start.saturating_add(budget).min(available);
+        let mut row_counts: Vec<usize> = (start..end)
+            .map(|index| choices.get(index).map_or(1, |candidate| wrapped_rows(candidate, prefix_width, width)))
+            .collect();
+        let mut total_rows: usize = row_counts.iter().sum();
+        while total_rows > budget && start < selection && end > start {
+            total_rows -= row_counts.remove(0);
+            start += 1;
+        }
+        while total_rows > budget && end > selection.saturating_add(1) && !row_counts.is_empty() {
+            total_rows -= row_counts.pop().unwrap_or(0);
+            end -= 1;
+        }
+        let mut rows_used = 0usize;
+        for index in start..end {
             self.write_bytes(b"\n")?;
             self.clear_line()?;
             let score = options.show_scores.then(|| choices.getscore(index)).flatten();
             let marked = options.multi && choices.source_index(index)
                 .is_some_and(|source| state.marked.contains(&source));
             if let Some(candidate) = choices.get(index) {
-                self.draw_candidate(candidate, state, score,
-                    index == selection && (!options.multi || state.focus_list),
-                    options.multi, marked)?;
+                let remaining = budget.saturating_sub(rows_used).max(1);
+                rows_used += self.draw_candidate(candidate, state, CandidateRow {
+                    score, width, max_rows: remaining,
+                    selected: index == selection && (!options.multi || state.focus_list),
+                    multi: options.multi, marked,
+                })?;
             }
+        }
+        for _ in rows_used..budget {
+            self.write_bytes(b"\n")?;
+            self.clear_line()?;
         }
 
         let result_rows = state.lines + usize::from(options.show_info || options.multi);
@@ -622,11 +645,9 @@ impl Terminal {
         &mut self,
         candidate: &[u8],
         state: &Editor,
-        score: Option<f64>,
-        selected: bool,
-        multi: bool,
-        marked: bool,
-    ) -> io::Result<()> {
+        row: CandidateRow,
+    ) -> io::Result<usize> {
+        let CandidateRow { score, width, max_rows, selected, multi, marked } = row;
         if selected { self.set_invert()?; }
         if multi {
             self.write_bytes(if marked { b"[x] " } else { b"[ ] " })?;
@@ -639,26 +660,62 @@ impl Terminal {
             }
         }
 
-        self.set_nowrap()?;
+        let prefix_width = usize::from(multi) * 4 + usize::from(score.is_some()) * 8;
+        if width <= prefix_width {
+            self.set_nowrap()?;
+            let positions = fz::match_positions(&state.query, candidate).unwrap_or_default();
+            let mut position = 0usize;
+            for (index, &byte) in candidate.iter().enumerate() {
+                if positions.get(position) == Some(&index) {
+                    self.set_foreground(3)?;
+                    position += 1;
+                } else {
+                    self.set_foreground(9)?;
+                }
+                if byte == b'\n' {
+                    self.write_bytes(b" ")?;
+                } else {
+                    self.output.write_all(&candidate[index..=index])?;
+                }
+            }
+            self.set_wrap()?;
+            self.set_normal()?;
+            return Ok(1);
+        }
 
         let positions = fz::match_positions(&state.query, candidate).unwrap_or_default();
         let mut position = 0usize;
-        for (index, &byte) in candidate.iter().enumerate() {
+        let mut column = prefix_width;
+        let mut rows = 1usize;
+        let mut index = 0usize;
+        while index < candidate.len() {
+            let (scalar, length) = decode_char(&candidate[index..]);
+            let char_width = if candidate[index] == b'\n' { 1 } else { scalar_width(scalar) };
+            if char_width > 0 && column + char_width > width {
+                if rows >= max_rows { break; }
+                self.write_bytes(b"\n")?;
+                self.set_column(0)?;
+                self.clear_line()?;
+                rows += 1;
+                column = 0;
+            }
             if positions.get(position) == Some(&index) {
                 self.set_foreground(3)?;
                 position += 1;
             } else {
                 self.set_foreground(9)?;
             }
-            if byte == b'\n' {
+            if candidate[index] == b'\n' {
                 self.write_bytes(b" ")?;
             } else {
-                self.output.write_all(&candidate[index..=index])?;
+                self.output.write_all(&candidate[index..index + length])?;
             }
+            column += char_width;
+            index += length;
         }
 
-        self.set_wrap()?;
-        self.set_normal()
+        self.set_normal()?;
+        Ok(rows)
     }
 
     fn clear(&mut self, lines: usize, show_info: bool) -> io::Result<()> {
@@ -850,6 +907,15 @@ enum InputResult {
     Cancel,
 }
 
+struct CandidateRow {
+    score: Option<f64>,
+    width: usize,
+    max_rows: usize,
+    selected: bool,
+    multi: bool,
+    marked: bool,
+}
+
 struct Editor {
     query: Vec<u8>,
     cursor: usize,
@@ -950,6 +1016,78 @@ impl Editor {
     fn right(&mut self) {
         self.cursor = next_boundary(&self.query, self.cursor);
     }
+}
+
+fn wrapped_rows(candidate: &[u8], prefix_width: usize, width: usize) -> usize {
+    if width <= prefix_width {
+        return 1;
+    }
+    let mut column = prefix_width;
+    let mut rows = 1usize;
+    let mut index = 0usize;
+    while index < candidate.len() {
+        let (scalar, length) = decode_char(&candidate[index..]);
+        let char_width = if candidate[index] == b'\n' { 1 } else { scalar_width(scalar) };
+        if char_width > 0 && column + char_width > width {
+            rows += 1;
+            column = char_width;
+        } else {
+            column += char_width;
+        }
+        index += length;
+    }
+    rows
+}
+
+fn decode_char(bytes: &[u8]) -> (u32, usize) {
+    let first = bytes[0];
+    if first < 0x80 {
+        return (u32::from(first), 1);
+    }
+    let (mut scalar, length) = match first {
+        0xC2..=0xDF => (u32::from(first & 0x1F), 2),
+        0xE0..=0xEF => (u32::from(first & 0x0F), 3),
+        0xF0..=0xF4 => (u32::from(first & 0x07), 4),
+        _ => return (u32::from(first), 1),
+    };
+    if bytes.len() < length {
+        return (u32::from(first), 1);
+    }
+    for &byte in bytes.iter().take(length).skip(1) {
+        if byte & 0b1100_0000 != 0b1000_0000 {
+            return (u32::from(first), 1);
+        }
+        scalar = (scalar << 6) | u32::from(byte & 0x3F);
+    }
+    let minimum = match length { 2 => 0x80, 3 => 0x800, _ => 0x1_0000 };
+    if scalar < minimum || scalar > 0x10_FFFF || (0xD800..0xE000).contains(&scalar) {
+        return (u32::from(first), 1);
+    }
+    (scalar, length)
+}
+
+fn scalar_width(scalar: u32) -> usize {
+    if scalar < 0x20 || (0x7F..0xA0).contains(&scalar) {
+        return 1;
+    }
+    if matches!(scalar,
+        0x0300..=0x036F | 0x0483..=0x0489 | 0x0591..=0x05BD | 0x05BF
+        | 0x05C1..=0x05C2 | 0x05C4..=0x05C7 | 0x0610..=0x061A | 0x064B..=0x065F
+        | 0x0670 | 0x06D6..=0x06DC | 0x06DF..=0x06E4 | 0x06E7..=0x06E8 | 0x06EA..=0x06ED
+        | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE00..=0xFE0F
+        | 0xFE20..=0xFE2F)
+    {
+        return 0;
+    }
+    if matches!(scalar,
+        0x1100..=0x115F | 0x2329..=0x232A | 0x2E80..=0x303E | 0x3041..=0x33FF
+        | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xA000..=0xA4CF | 0xAC00..=0xD7A3
+        | 0xF900..=0xFAFF | 0xFE10..=0xFE19 | 0xFE30..=0xFE6F | 0xFF00..=0xFF60
+        | 0xFFE0..=0xFFE6 | 0x1F300..=0x1F64F | 0x1F900..=0x1F9FF | 0x20000..=0x3FFFD)
+    {
+        return 2;
+    }
+    1
 }
 
 fn is_printable(byte: u8) -> bool {

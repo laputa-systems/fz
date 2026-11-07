@@ -16,4 +16,6 @@ The upstream C build can round the initial gap score differently by platform: th
 
 Interactive mode reads candidates from stdin and opens the configured terminal device, `/dev/tty` by default. The terminal saves its original termios state, enters raw mode, and restores the saved state on completion, cancellation, or drop. Linux resize delivery uses a blocked `SIGWINCH` mask and `signalfd`; it does not install a signal handler.
 
+Result rows wrap at the terminal width instead of truncating, so a long candidate occupies as many physical rows as it needs within the `--lines` budget; later candidates are dropped from view when the budget is full. Unlike fzy, which clips a row at the right edge, wrapping keeps the tail of entries such as long process argument lists readable on narrow terminals. Wide and combining characters count by display width when wrapping.
+
 The binary uses a custom entry point to skip Rust runtime startup. It keeps the default `SIGPIPE` disposition and flushes its own stdout before returning.
