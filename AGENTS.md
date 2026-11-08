@@ -13,7 +13,7 @@
 - Do not add configuration, shell integration, previews, or further selector features; simplify the Rust implementation instead of transliterating C.
 - Keep the upstream checkout at `~/d/fzy` read-only and use it as the behavioral oracle.
 - Preserve byte-based matching and platform-specific floating-point ordering, including one-ULP differences.
-- Keep `rustix` for terminal/event access, `libc` on Linux for signal masks, and the existing benchmark dependency; ask before adding others.
+- Keep `rustix` for terminal/event access, `libc` on Linux for signal masks and on macOS for the SIGWINCH wake handler, and the existing benchmark dependency; ask before adding others.
 - Keep the upstream MIT notice in `LICENSE`.
 
 ## Topics

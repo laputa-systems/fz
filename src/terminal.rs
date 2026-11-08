@@ -13,23 +13,21 @@ use rustix::{
     io::{self as rustix_io, Errno},
 };
 #[cfg(target_os = "macos")]
-use rustix::{
-    event::kqueue::{self, Event, EventFilter, EventFlags},
-    io::Errno,
-    process::Signal,
-};
+use rustix::io::Errno;
 use rustix::termios::{self, InputModes, LocalModes, OptionalActions, Termios};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 #[cfg(target_os = "linux")]
 use std::marker::PhantomData;
 use std::mem;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 use std::mem::MaybeUninit;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicI32, Ordering};
 #[cfg(target_os = "linux")]
 use std::os::fd::{FromRawFd, OwnedFd};
 #[cfg(target_os = "macos")]
-use std::os::fd::OwnedFd;
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::Path;
 #[cfg(target_os = "linux")]
 use std::rc::Rc;
@@ -43,9 +41,31 @@ compile_error!("fz's terminal boundary supports Linux and macOS on x86_64 or aar
 
 #[cfg(target_os = "macos")]
 struct ResizeEvents {
-    // kqueue keeps the raw input descriptor registered, so this field must
-    // precede `Terminal::input` and be dropped first.
-    queue: OwnedFd,
+    wake_read: OwnedFd,
+    wake_write: OwnedFd,
+    previous: libc::sigaction,
+    installed: bool,
+}
+
+#[cfg(target_os = "macos")]
+static WINCH_WRITE: AtomicI32 = AtomicI32::new(-1);
+
+#[cfg(target_os = "macos")]
+extern "C" fn notify_winch(_: libc::c_int) {
+    let fd = WINCH_WRITE.load(Ordering::Acquire);
+    if fd < 0 {
+        return;
+    }
+    let token = [1u8];
+    // SAFETY: `__error` is this thread's errno slot. `write` is async-signal-safe
+    // and may replace errno, so the interrupted value is restored before return.
+    // `fd` is the write end published by install and cleared before that end closes.
+    unsafe {
+        let errno_slot = libc::__error();
+        let saved = *errno_slot;
+        libc::write(fd, token.as_ptr().cast(), 1);
+        *errno_slot = saved;
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -213,81 +233,157 @@ fn restore_signal_mask(mask: &libc::sigset_t) -> io::Result<()> {
 #[cfg(target_os = "macos")]
 impl ResizeEvents {
     fn install(_: &File) -> io::Result<Self> {
-        let queue = kqueue::kqueue()?;
-        // Only resize delivery is registered here. An EVFILT_READ entry for
-        // the tty reports the line discipline's pending input state in
-        // `data` and would turn a nonzero `data` into a spurious failure in
-        // any result check; the queue fd joins the input fd in the wait
-        // loop's poll set instead, so no read filter is needed.
-        let changes = [
-            Event::new(
-                EventFilter::Signal {
-                    signal: Signal::WINCH,
-                    times: 0,
-                },
-                EventFlags::ADD | EventFlags::CLEAR,
-                std::ptr::null_mut(),
-            ),
-        ];
-        let mut events = [MaybeUninit::uninit(); 1];
-        // SAFETY: the queue outlives this call and the buffer holds the
-        // single registered signal filter's state.
-        let _ = unsafe {
-            kqueue::kevent(&queue, &changes, &mut events, Some(Duration::ZERO))?
-        };
-        Ok(Self { queue })
+        // select does not honor a finite timeout while a kqueue descriptor is
+        // in the set: Darwin 25 reports that descriptor readable with no
+        // pending SIGWINCH, and the bare-Escape wait redraws until the job is
+        // killed. A pipe is an ordinary descriptor, so the same select times
+        // out and still wakes when this handler records SIGWINCH.
+        let mut pipes = [0; 2];
+        // SAFETY: `pipes` is writable storage for two descriptors. On failure
+        // neither entry is owned.
+        if unsafe { libc::pipe(pipes.as_mut_ptr()) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        for fd in pipes {
+            // SAFETY: both descriptors came from this `pipe` call and are open.
+            let fd_flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+            let status = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if fd_flags == -1
+                || status == -1
+                || unsafe { libc::fcntl(fd, libc::F_SETFD, fd_flags | libc::FD_CLOEXEC) } == -1
+                || unsafe { libc::fcntl(fd, libc::F_SETFL, status | libc::O_NONBLOCK) } == -1
+            {
+                let error = io::Error::last_os_error();
+                // SAFETY: both descriptors are still raw and owned by this function.
+                unsafe {
+                    libc::close(pipes[0]);
+                    libc::close(pipes[1]);
+                }
+                return Err(error);
+            }
+        }
+        // SAFETY: pipe returned two owned descriptors, and both are still open.
+        let wake_read = unsafe { OwnedFd::from_raw_fd(pipes[0]) };
+        let wake_write = unsafe { OwnedFd::from_raw_fd(pipes[1]) };
+        WINCH_WRITE.store(pipes[1], Ordering::Release);
+
+        // SAFETY: both sigaction values are zeroed, which is the all-zero
+        // representation of the Apple struct. `notify_winch` is an `extern "C"`
+        // function. `sa_mask` is writable. `previous` receives the old action.
+        let mut action: libc::sigaction = unsafe { mem::zeroed() };
+        action.sa_sigaction = notify_winch as *const () as libc::sighandler_t;
+        action.sa_flags = libc::SA_RESTART;
+        let mut previous: libc::sigaction = unsafe { mem::zeroed() };
+        if unsafe { libc::sigemptyset(&mut action.sa_mask) } == -1
+            || unsafe { libc::sigaction(libc::SIGWINCH, &action, &mut previous) } == -1
+        {
+            let error = io::Error::last_os_error();
+            WINCH_WRITE.store(-1, Ordering::Release);
+            return Err(error);
+        }
+        Ok(Self {
+            wake_read,
+            wake_write,
+            previous,
+            installed: true,
+        })
     }
 
     fn wait_for_input(&self, input: &File, timeout: Option<Duration>) -> io::Result<Wait> {
         // macOS poll reports POLLNVAL for /dev/tty, the default terminal
-        // device, so wait with select, which handles it. The queue fd joins
-        // the tty fd in the read set instead of a poll set.
+        // device, so wait with select, which handles it.
         use rustix::event::{FdSetElement, Timespec, fd_set_insert, fd_set_num_elements, select, FdSetIter};
         use std::os::fd::{AsFd, AsRawFd};
-        let queue = self.queue.as_fd().as_raw_fd();
+        let wake = self.wake_read.as_fd().as_raw_fd();
         let tty = input.as_fd().as_raw_fd();
-        let nfds = queue.max(tty) + 1;
+        let nfds = wake.max(tty) + 1;
         let timeout = timeout.map(|timeout| {
             Timespec::try_from(timeout).expect("the fixed escape timeout fits in a timespec")
         });
         let mut readfds = vec![FdSetElement::default(); fd_set_num_elements(2, nfds)];
-        fd_set_insert(&mut readfds, queue);
+        fd_set_insert(&mut readfds, wake);
         fd_set_insert(&mut readfds, tty);
         // SAFETY: both descriptors are owned by this terminal and stay open
         // for the call; the set fits every inserted descriptor.
         match unsafe { select(nfds, Some(&mut readfds), None, None, timeout.as_ref()) } {
             Ok(0) => Ok(Wait::TimedOut),
-            Ok(_) if FdSetIter::new(&readfds).any(|fd| fd == queue) => {
-                let mut events = [MaybeUninit::uninit(); 1];
-                // SAFETY: the queue outlives this call and the buffer is
-                // sized for the single registered signal filter.
-                let (events, _) =
-                    unsafe { kqueue::kevent(&self.queue, &[], &mut events, Some(Duration::ZERO))? };
-                for event in events.iter() {
-                    if event.flags().contains(EventFlags::ERROR) && event.data() != 0 {
-                        return Err(io::Error::from_raw_os_error(event.data() as i32));
+            Ok(_) => {
+                let mut wake_ready = false;
+                let mut tty_ready = false;
+                for fd in FdSetIter::new(&readfds) {
+                    if fd == wake {
+                        wake_ready = true;
+                    } else if fd == tty {
+                        tty_ready = true;
                     }
                 }
-                // Input may be ready too. Redraw first; it stays readable for
-                // the next iteration, which preserves the resize transition.
-                Ok(Wait::Interrupted)
+                if wake_ready {
+                    self.drain_wake()?;
+                    // Input may be ready too. Redraw first; it stays readable
+                    // for the next iteration, which preserves the resize transition.
+                    Ok(Wait::Interrupted)
+                } else if tty_ready {
+                    Ok(Wait::Ready)
+                } else {
+                    Ok(Wait::TimedOut)
+                }
             }
-            Ok(_) => Ok(Wait::Ready),
             Err(Errno::INTR) => Ok(Wait::Interrupted),
             Err(error) => Err(error.into()),
         }
     }
 
+    fn drain_wake(&self) -> io::Result<()> {
+        let mut buf = [0u8; 64];
+        loop {
+            match rustix::io::read(&self.wake_read, &mut buf) {
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "resize wake pipe closed",
+                    ));
+                }
+                Ok(_) => {}
+                Err(Errno::INTR) => continue,
+                Err(Errno::AGAIN) => return Ok(()),
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+
     fn restore(&mut self) -> io::Result<()> {
-        // EVFILT_SIGNAL observes SIGWINCH without changing its disposition.
+        use std::os::fd::AsRawFd;
+        if !self.installed {
+            return Ok(());
+        }
+        // SAFETY: `previous` was captured from the successful install on this
+        // process, and a null old-action pointer only installs that action.
+        if unsafe { libc::sigaction(libc::SIGWINCH, &self.previous, std::ptr::null_mut()) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        self.installed = false;
+        let _ = WINCH_WRITE.compare_exchange(
+            self.wake_write.as_raw_fd(),
+            -1,
+            Ordering::Release,
+            Ordering::Relaxed,
+        );
         Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for ResizeEvents {
+    fn drop(&mut self) {
+        if self.restore().is_err() {
+            // The handler must not write a descriptor this drop is about to close.
+            WINCH_WRITE.store(-1, Ordering::Release);
+        }
     }
 }
 
 /// A raw-mode terminal. Dropping it always puts its saved termios state back.
 pub struct Terminal {
-    // On macOS, the queue references `input` by raw descriptor. Rust drops
-    // fields in declaration order, so keep the queue first.
     resize_events: ResizeEvents,
     input: File,
     output: BufWriter<File>,

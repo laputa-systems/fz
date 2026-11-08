@@ -14,7 +14,7 @@ The upstream C build can round the initial gap score differently by platform: th
 
 ## Terminal and process behavior
 
-Interactive mode reads candidates from stdin and opens the configured terminal device, `/dev/tty` by default. The terminal saves its original termios state, enters raw mode, and restores the saved state on completion, cancellation, or drop. Linux resize delivery uses a blocked `SIGWINCH` mask and `signalfd`; it does not install a signal handler.
+Interactive mode reads candidates from stdin and opens the configured terminal device, `/dev/tty` by default. The terminal saves its original termios state, enters raw mode, and restores the saved state on completion, cancellation, or drop. Linux resize delivery uses a blocked `SIGWINCH` mask and `signalfd`; it does not install a signal handler. macOS waits with `select` because `poll` reports `POLLNVAL` for `/dev/tty`, and records `SIGWINCH` through a handler that writes one byte to a pipe. `select` does not time out reliably when a `kqueue` descriptor is in the set.
 
 Result rows wrap at the terminal width instead of truncating, so a long candidate occupies as many physical rows as it needs within the `--lines` budget; later candidates are dropped from view when the budget is full. Unlike fzy, which clips a row at the right edge, wrapping keeps the tail of entries such as long process argument lists readable on narrow terminals. Wide and combining characters count by display width when wrapping.
 
