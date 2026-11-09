@@ -583,7 +583,7 @@ impl ResizeEvents {
         let mut wake_ready = false;
         let mut tty_ready = false;
         for event in events.iter().take(ready as usize) {
-            if event.flags & libc::EV_ERROR as u16 != 0 {
+            if event.flags & libc::EV_ERROR != 0 {
                 return Err(io::Error::from_raw_os_error(event.data as i32));
             }
             if event.filter == libc::EVFILT_READ && event.ident == wake as usize {
@@ -641,7 +641,7 @@ impl ResizeEvents {
             };
         }
         Ok(events.iter().take(ready as usize).any(|event| {
-            event.flags & libc::EV_ERROR as u16 == 0
+            event.flags & libc::EV_ERROR == 0
                 && event.filter == libc::EVFILT_READ
                 && event.ident == tty as usize
         }))
