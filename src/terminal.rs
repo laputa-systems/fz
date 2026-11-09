@@ -17,21 +17,29 @@ use rustix::io::Errno;
 use rustix::termios::{self, InputModes, LocalModes, OptionalActions, Termios};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::marker::PhantomData;
 use std::mem;
 #[cfg(target_os = "linux")]
 use std::mem::MaybeUninit;
-#[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicI32, Ordering};
 #[cfg(target_os = "linux")]
 use std::os::fd::{FromRawFd, OwnedFd};
 #[cfg(target_os = "macos")]
 use std::os::fd::{FromRawFd, OwnedFd};
+#[cfg(target_os = "macos")]
+use std::os::unix::thread::JoinHandleExt;
+#[cfg(target_os = "macos")]
+use std::rc::Rc;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::Arc;
+#[cfg(target_os = "macos")]
+use std::thread::JoinHandle;
 use std::path::Path;
 #[cfg(target_os = "linux")]
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(not(all(
     any(target_os = "linux", target_os = "macos"),
@@ -43,30 +51,18 @@ compile_error!("fz's terminal boundary supports Linux and macOS on x86_64 or aar
 struct ResizeEvents {
     wake_read: OwnedFd,
     wake_write: OwnedFd,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
     previous: libc::sigaction,
+    original_mask: libc::sigset_t,
     installed: bool,
+    // pthread_sigmask is thread-local. Restoring it on another thread would
+    // leak the blocked SIGWINCH into whichever thread dropped the terminal.
+    _thread_bound: PhantomData<Rc<()>>,
 }
 
 #[cfg(target_os = "macos")]
-static WINCH_WRITE: AtomicI32 = AtomicI32::new(-1);
-
-#[cfg(target_os = "macos")]
-extern "C" fn notify_winch(_: libc::c_int) {
-    let fd = WINCH_WRITE.load(Ordering::Acquire);
-    if fd < 0 {
-        return;
-    }
-    let token = [1u8];
-    // SAFETY: `__error` is this thread's errno slot. `write` is async-signal-safe
-    // and may replace errno, so the interrupted value is restored before return.
-    // `fd` is the write end published by install and cleared before that end closes.
-    unsafe {
-        let errno_slot = libc::__error();
-        let saved = *errno_slot;
-        libc::write(fd, token.as_ptr().cast(), 1);
-        *errno_slot = saved;
-    }
-}
+extern "C" fn discard_winch(_: libc::c_int) {}
 
 #[cfg(target_os = "linux")]
 struct ResizeEvents {
@@ -192,6 +188,17 @@ impl ResizeEvents {
         }
         Ok(())
     }
+
+    fn input_pending(&self, input: &File) -> io::Result<bool> {
+        let timeout = Timespec::try_from(Duration::ZERO).expect("a zero timeout fits in a timespec");
+        let mut descriptors = [PollFd::new(input, PollFlags::IN)];
+        match event::poll(&mut descriptors, Some(&timeout)) {
+            Ok(0) => Ok(false),
+            Ok(_) => Ok(descriptors[0].revents().contains(PollFlags::IN)),
+            Err(Errno::INTR) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -231,61 +238,156 @@ fn restore_signal_mask(mask: &libc::sigset_t) -> io::Result<()> {
 }
 
 #[cfg(target_os = "macos")]
+fn configure_fd(fd: libc::c_int) -> io::Result<()> {
+    // SAFETY: `fd` is an open descriptor owned by the caller.
+    let fd_flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    let status = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if fd_flags == -1
+        || status == -1
+        || unsafe { libc::fcntl(fd, libc::F_SETFD, fd_flags | libc::FD_CLOEXEC) } == -1
+        || unsafe { libc::fcntl(fd, libc::F_SETFL, status | libc::O_NONBLOCK) } == -1
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn winch_mask() -> io::Result<libc::sigset_t> {
+    let mut mask: libc::sigset_t = unsafe { mem::zeroed() };
+    if unsafe { libc::sigemptyset(&mut mask) } == -1
+        || unsafe { libc::sigaddset(&mut mask, libc::SIGWINCH) } == -1
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(mask)
+}
+
+#[cfg(target_os = "macos")]
+fn serve_winch(write_fd: libc::c_int, stop: Arc<AtomicBool>) {
+    let Ok(mask) = winch_mask() else {
+        unsafe { libc::close(write_fd) };
+        return;
+    };
+    while !stop.load(Ordering::Acquire) {
+        let mut signal = 0;
+        // SAFETY: `mask` contains SIGWINCH, which is blocked in this thread.
+        // sigwait dequeues it without running a handler.
+        let result = unsafe { libc::sigwait(&mask, &mut signal) };
+        if result != 0 || stop.load(Ordering::Acquire) {
+            break;
+        }
+        let token = [1u8];
+        unsafe {
+            libc::write(write_fd, token.as_ptr().cast(), 1);
+        }
+    }
+    unsafe { libc::close(write_fd) };
+}
+
+#[cfg(target_os = "macos")]
 impl ResizeEvents {
     fn install(_: &File) -> io::Result<Self> {
-        // select does not honor a finite timeout while a kqueue descriptor is
-        // in the set: Darwin 25 reports that descriptor readable with no
-        // pending SIGWINCH, and the bare-Escape wait redraws until the job is
-        // killed. A pipe is an ordinary descriptor, so the same select times
-        // out and still wakes when this handler records SIGWINCH.
+        // A SIGWINCH handler that writes while the main thread is inside a tty
+        // operation can wedge the process so the bare-Escape wait never
+        // returns. SIGWINCH stays blocked. Its default disposition is ignore,
+        // which would discard it before sigwait, so a no-op handler marks it
+        // catchable and the blocked mask keeps that handler from running.
         let mut pipes = [0; 2];
         // SAFETY: `pipes` is writable storage for two descriptors. On failure
         // neither entry is owned.
         if unsafe { libc::pipe(pipes.as_mut_ptr()) } == -1 {
             return Err(io::Error::last_os_error());
         }
-        for fd in pipes {
-            // SAFETY: both descriptors came from this `pipe` call and are open.
-            let fd_flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-            let status = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-            if fd_flags == -1
-                || status == -1
-                || unsafe { libc::fcntl(fd, libc::F_SETFD, fd_flags | libc::FD_CLOEXEC) } == -1
-                || unsafe { libc::fcntl(fd, libc::F_SETFL, status | libc::O_NONBLOCK) } == -1
-            {
-                let error = io::Error::last_os_error();
-                // SAFETY: both descriptors are still raw and owned by this function.
-                unsafe {
-                    libc::close(pipes[0]);
-                    libc::close(pipes[1]);
-                }
-                return Err(error);
+        if let Err(error) = configure_fd(pipes[0]).and_then(|()| configure_fd(pipes[1])) {
+            unsafe {
+                libc::close(pipes[0]);
+                libc::close(pipes[1]);
             }
+            return Err(error);
+        }
+        // SAFETY: `pipes[1]` is the open write end. The duplicate is owned by
+        // the sigwait thread, which closes it when that thread exits.
+        let thread_write = unsafe { libc::dup(pipes[1]) };
+        if thread_write == -1 {
+            let error = io::Error::last_os_error();
+            unsafe {
+                libc::close(pipes[0]);
+                libc::close(pipes[1]);
+            }
+            return Err(error);
+        }
+        if let Err(error) = configure_fd(thread_write) {
+            unsafe {
+                libc::close(pipes[0]);
+                libc::close(pipes[1]);
+                libc::close(thread_write);
+            }
+            return Err(error);
         }
         // SAFETY: pipe returned two owned descriptors, and both are still open.
         let wake_read = unsafe { OwnedFd::from_raw_fd(pipes[0]) };
         let wake_write = unsafe { OwnedFd::from_raw_fd(pipes[1]) };
-        WINCH_WRITE.store(pipes[1], Ordering::Release);
 
-        // SAFETY: both sigaction values are zeroed, which is the all-zero
-        // representation of the Apple struct. `notify_winch` is an `extern "C"`
-        // function. `sa_mask` is writable. `previous` receives the old action.
+        let mask = match winch_mask() {
+            Ok(mask) => mask,
+            Err(error) => {
+                unsafe { libc::close(thread_write) };
+                return Err(error);
+            }
+        };
+        let mut original_mask: libc::sigset_t = unsafe { mem::zeroed() };
+        // SAFETY: `mask` is initialized. pthread_sigmask writes the previous
+        // mask and returns its error number instead of setting errno.
+        let mask_result = unsafe {
+            libc::pthread_sigmask(libc::SIG_BLOCK, &mask, &mut original_mask)
+        };
+        if mask_result != 0 {
+            unsafe { libc::close(thread_write) };
+            return Err(io::Error::from_raw_os_error(mask_result));
+        }
+
+        // SAFETY: both sigaction values are zeroed. `discard_winch` is an
+        // `extern "C"` function and is not invoked while SIGWINCH stays blocked.
         let mut action: libc::sigaction = unsafe { mem::zeroed() };
-        action.sa_sigaction = notify_winch as *const () as libc::sighandler_t;
-        action.sa_flags = libc::SA_RESTART;
+        action.sa_sigaction = discard_winch as *const () as libc::sighandler_t;
         let mut previous: libc::sigaction = unsafe { mem::zeroed() };
         if unsafe { libc::sigemptyset(&mut action.sa_mask) } == -1
             || unsafe { libc::sigaction(libc::SIGWINCH, &action, &mut previous) } == -1
         {
             let error = io::Error::last_os_error();
-            WINCH_WRITE.store(-1, Ordering::Release);
+            unsafe {
+                libc::pthread_sigmask(libc::SIG_SETMASK, &original_mask, std::ptr::null_mut());
+                libc::close(thread_write);
+            }
             return Err(error);
         }
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let thread = match std::thread::Builder::new()
+            .name("fz-sigwinch".to_string())
+            .spawn(move || serve_winch(thread_write, thread_stop))
+        {
+            Ok(thread) => thread,
+            Err(error) => {
+                unsafe {
+                    libc::sigaction(libc::SIGWINCH, &previous, std::ptr::null_mut());
+                    libc::pthread_sigmask(libc::SIG_SETMASK, &original_mask, std::ptr::null_mut());
+                    libc::close(thread_write);
+                }
+                return Err(error);
+            }
+        };
         Ok(Self {
             wake_read,
             wake_write,
+            stop,
+            thread: Some(thread),
             previous,
+            original_mask,
             installed: true,
+            _thread_bound: PhantomData,
         })
     }
 
@@ -351,23 +453,67 @@ impl ResizeEvents {
         }
     }
 
+    fn input_pending(&self, input: &File) -> io::Result<bool> {
+        use rustix::event::{FdSetElement, Timespec, fd_set_insert, fd_set_num_elements, select};
+        use std::os::fd::{AsFd, AsRawFd};
+        let tty = input.as_fd().as_raw_fd();
+        let nfds = tty + 1;
+        let timeout = Timespec::try_from(Duration::ZERO).expect("a zero timeout fits in a timespec");
+        let mut readfds = vec![FdSetElement::default(); fd_set_num_elements(1, nfds)];
+        fd_set_insert(&mut readfds, tty);
+        // SAFETY: `tty` stays open for the call, and the set covers that descriptor.
+        match unsafe { select(nfds, Some(&mut readfds), None, None, Some(&timeout)) } {
+            Ok(0) => Ok(false),
+            Ok(_) => Ok(true),
+            Err(Errno::INTR) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     fn restore(&mut self) -> io::Result<()> {
-        use std::os::fd::AsRawFd;
         if !self.installed {
             return Ok(());
         }
-        // SAFETY: `previous` was captured from the successful install on this
-        // process, and a null old-action pointer only installs that action.
+        // The write end stays open until the sigwait thread has exited.
+        let _ = &self.wake_write;
+        self.stop.store(true, Ordering::Release);
+        let mut join_failed = false;
+        if let Some(thread) = self.thread.take() {
+            // SAFETY: the thread is blocked in sigwait, or about to enter it,
+            // with SIGWINCH blocked, so this directed signal unblocks sigwait.
+            let kill_result = unsafe { libc::pthread_kill(thread.as_pthread_t(), libc::SIGWINCH) };
+            join_failed = thread.join().is_err();
+            if kill_result != 0 && kill_result != libc::ESRCH {
+                let _ = unsafe {
+                    libc::sigaction(libc::SIGWINCH, &self.previous, std::ptr::null_mut())
+                };
+                let _ = unsafe {
+                    libc::pthread_sigmask(
+                        libc::SIG_SETMASK,
+                        &self.original_mask,
+                        std::ptr::null_mut(),
+                    )
+                };
+                self.installed = false;
+                return Err(io::Error::from_raw_os_error(kill_result));
+            }
+        }
+        // SAFETY: `previous` was captured from the successful install, and a
+        // null old-action pointer only installs that action. The saved mask
+        // belongs to this thread.
         if unsafe { libc::sigaction(libc::SIGWINCH, &self.previous, std::ptr::null_mut()) } == -1 {
             return Err(io::Error::last_os_error());
         }
+        let mask_result = unsafe {
+            libc::pthread_sigmask(libc::SIG_SETMASK, &self.original_mask, std::ptr::null_mut())
+        };
+        if mask_result != 0 {
+            return Err(io::Error::from_raw_os_error(mask_result));
+        }
         self.installed = false;
-        let _ = WINCH_WRITE.compare_exchange(
-            self.wake_write.as_raw_fd(),
-            -1,
-            Ordering::Release,
-            Ordering::Relaxed,
-        );
+        if join_failed {
+            return Err(io::Error::other("resize thread panicked"));
+        }
         Ok(())
     }
 }
@@ -375,10 +521,7 @@ impl ResizeEvents {
 #[cfg(target_os = "macos")]
 impl Drop for ResizeEvents {
     fn drop(&mut self) {
-        if self.restore().is_err() {
-            // The handler must not write a descriptor this drop is about to close.
-            WINCH_WRITE.store(-1, Ordering::Release);
-        }
+        let _ = self.restore();
     }
 }
 
@@ -397,6 +540,21 @@ impl Terminal {
     pub fn open(path: &Path) -> io::Result<Self> {
         let input = OpenOptions::new().read(true).open(path)?;
         let output = OpenOptions::new().write(true).open(path)?;
+        // select on a macOS tty can report readability when a following read
+        // would block. A blocking read there never returns, so the descriptor
+        // stays nonblocking and a false ready result goes back to the wait.
+        #[cfg(target_os = "macos")]
+        {
+            use std::os::fd::AsRawFd;
+            let fd = input.as_raw_fd();
+            // SAFETY: `fd` is the descriptor just opened for this terminal.
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if flags == -1
+                || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
+            {
+                return Err(io::Error::last_os_error());
+            }
+        }
 
         let original = termios::tcgetattr(&input)?;
         let mut raw = original.clone();
@@ -458,21 +616,49 @@ impl Terminal {
 
         self.draw(&mut choices, options, &state)?;
         let mut input_ready = false;
+        // The 25ms bare-Escape window is wall time from the Escape byte. A
+        // resize wake must not start that window over, or a stream of
+        // SIGWINCH keeps the selector up until the process is killed.
+        let mut escape_deadline: Option<Instant> = None;
         loop {
             // Only a bare Escape is ambiguous. Other partial key sequences
             // wait for their next byte, exactly like fzy's keybinding parser.
-            let timeout = state
-                .ambiguous_key_pending
-                .then_some(Duration::from_millis(25));
-            let ready = if input_ready { Wait::Ready } else { self.wait_for_input(timeout)? };
+            if state.ambiguous_key_pending {
+                escape_deadline.get_or_insert_with(|| Instant::now() + Duration::from_millis(25));
+            } else {
+                escape_deadline = None;
+            }
+            let timeout = escape_deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
+            let mut ready = if input_ready {
+                Wait::Ready
+            } else if timeout == Some(Duration::ZERO) {
+                Wait::TimedOut
+            } else {
+                self.wait_for_input(timeout)?
+            };
             input_ready = false;
-            let byte = match ready {
-                Wait::Ready => Some(self.read_byte()?.ok_or(io::ErrorKind::UnexpectedEof)?),
-                Wait::Interrupted => {
-                    self.draw(&mut choices, options, &state)?;
+            if matches!(ready, Wait::Interrupted) {
+                self.draw(&mut choices, options, &state)?;
+                // A resize wake leaves queued input readable. Consuming it on
+                // the next iteration never happens while wakes keep arriving,
+                // so a SIGWINCH stream would swallow the Escape that starts
+                // the deadline.
+                if self.resize_events.input_pending(&self.input)? {
+                    ready = Wait::Ready;
+                } else if escape_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    ready = Wait::TimedOut;
+                } else {
                     continue;
                 }
-                Wait::TimedOut => None,
+            }
+            let byte = match ready {
+                Wait::Ready => match self.read_byte() {
+                    Ok(Some(byte)) => Some(byte),
+                    Ok(None) => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "terminal input closed")),
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                    Err(error) => return Err(error),
+                },
+                Wait::TimedOut | Wait::Interrupted => None,
             };
             match self.handle_input(&mut state, &mut choices, byte, byte.is_none()) {
                 InputResult::Continue { search_changed } => {
