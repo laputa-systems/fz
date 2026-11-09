@@ -51,6 +51,7 @@ compile_error!("fz's terminal boundary supports Linux and macOS on x86_64 or aar
 struct ResizeEvents {
     wake_read: OwnedFd,
     wake_write: OwnedFd,
+    queue: Option<OwnedFd>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     previous: libc::sigaction,
@@ -238,6 +239,56 @@ fn restore_signal_mask(mask: &libc::sigset_t) -> io::Result<()> {
 }
 
 #[cfg(target_os = "macos")]
+fn event_queue(wake: &OwnedFd, input: &File) -> io::Result<Option<OwnedFd>> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: kqueue returns a new descriptor or -1. O_NONBLOCK on a kqueue
+    // fails with ENOTTY, so only close-on-exec is set.
+    let fd = unsafe { libc::kqueue() };
+    if fd == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd_flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if fd_flags == -1
+        || unsafe { libc::fcntl(fd, libc::F_SETFD, fd_flags | libc::FD_CLOEXEC) } == -1
+    {
+        let error = io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(error);
+    }
+    let queue = unsafe { OwnedFd::from_raw_fd(fd) };
+    for watched in [wake.as_raw_fd(), input.as_raw_fd()] {
+        let change = libc::kevent {
+            ident: watched as libc::uintptr_t,
+            filter: libc::EVFILT_READ,
+            flags: libc::EV_ADD,
+            fflags: 0,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        };
+        // SAFETY: `queue` and `watched` are open. One change is registered.
+        let ready = unsafe {
+            libc::kevent(
+                queue.as_raw_fd(),
+                &change,
+                1,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+            )
+        };
+        if ready == -1 {
+            let error = io::Error::last_os_error();
+            // /dev/tty cannot be watched. The caller keeps select for that device.
+            if error.raw_os_error() == Some(libc::EINVAL) {
+                return Ok(None);
+            }
+            return Err(error);
+        }
+    }
+    Ok(Some(queue))
+}
+
+#[cfg(target_os = "macos")]
 fn arm_wake(write: &OwnedFd, after: Duration) -> io::Result<()> {
     use std::os::fd::AsRawFd;
     // SAFETY: `dup` of the open write end returns a new descriptor or -1.
@@ -318,7 +369,7 @@ fn serve_winch(write_fd: libc::c_int, stop: Arc<AtomicBool>) {
 
 #[cfg(target_os = "macos")]
 impl ResizeEvents {
-    fn install(_: &File) -> io::Result<Self> {
+    fn install(input: &File) -> io::Result<Self> {
         // A SIGWINCH handler that writes while the main thread is inside a tty
         // operation can wedge the process so the bare-Escape wait never
         // returns. SIGWINCH stays blocked. Its default disposition is ignore,
@@ -410,9 +461,11 @@ impl ResizeEvents {
                 return Err(error);
             }
         };
+        let queue = event_queue(&wake_read, input)?;
         Ok(Self {
             wake_read,
             wake_write,
+            queue,
             stop,
             thread: Some(thread),
             previous,
@@ -423,8 +476,12 @@ impl ResizeEvents {
     }
 
     fn wait_for_input(&self, input: &File, timeout: Option<Duration>) -> io::Result<Wait> {
-        // macOS poll reports POLLNVAL for /dev/tty, the default terminal
-        // device, so wait with select, which handles it.
+        if self.queue.is_some() {
+            return self.wait_on_queue(input, timeout);
+        }
+        // macOS poll reports POLLNVAL for /dev/tty, and kevent rejects that
+        // device with EINVAL. select handles it. A positive timeval does not
+        // return on the Darwin 25 runner, so that deadline writes the pipe.
         use rustix::event::{FdSetElement, Timespec, fd_set_insert, fd_set_num_elements, select, FdSetIter};
         use std::os::fd::{AsFd, AsRawFd};
         let wake = self.wake_read.as_fd().as_raw_fd();
@@ -492,7 +549,63 @@ impl ResizeEvents {
         }
     }
 
+    fn wait_on_queue(&self, input: &File, timeout: Option<Duration>) -> io::Result<Wait> {
+        use std::os::fd::AsRawFd;
+        let queue = self.queue.as_ref().expect("queue is open").as_raw_fd();
+        let wake = self.wake_read.as_raw_fd();
+        let tty = input.as_raw_fd();
+        let mut spec = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+        let timeout_ptr = match timeout {
+            None => std::ptr::null(),
+            Some(duration) => {
+                spec.tv_sec = duration.as_secs() as libc::time_t;
+                spec.tv_nsec = duration.subsec_nanos() as libc::c_long;
+                &spec
+            }
+        };
+        let mut events: [libc::kevent; 2] = unsafe { mem::zeroed() };
+        // SAFETY: the kqueue, tty, and wake pipe stay open. Both read filters
+        // were added when the queue was created. `events` holds two notes.
+        let ready = unsafe {
+            libc::kevent(queue, std::ptr::null(), 0, events.as_mut_ptr(), 2, timeout_ptr)
+        };
+        if ready == -1 {
+            let error = io::Error::last_os_error();
+            return if error.kind() == io::ErrorKind::Interrupted {
+                Ok(Wait::Interrupted)
+            } else {
+                Err(error)
+            };
+        }
+        if ready == 0 {
+            return Ok(Wait::TimedOut);
+        }
+        let mut wake_ready = false;
+        let mut tty_ready = false;
+        for event in events.iter().take(ready as usize) {
+            if event.flags & libc::EV_ERROR as u16 != 0 {
+                return Err(io::Error::from_raw_os_error(event.data as i32));
+            }
+            if event.filter == libc::EVFILT_READ && event.ident == wake as usize {
+                wake_ready = true;
+            } else if event.filter == libc::EVFILT_READ && event.ident == tty as usize {
+                tty_ready = true;
+            }
+        }
+        if wake_ready {
+            self.drain_wake()?;
+            Ok(Wait::Interrupted)
+        } else if tty_ready {
+            Ok(Wait::Ready)
+        } else {
+            Ok(Wait::TimedOut)
+        }
+    }
+
     fn input_pending(&self, input: &File) -> io::Result<bool> {
+        if self.queue.is_some() {
+            return self.queue_input_pending(input);
+        }
         use rustix::event::{FdSetElement, Timespec, fd_set_insert, fd_set_num_elements, select};
         use std::os::fd::{AsFd, AsRawFd};
         let tty = input.as_fd().as_raw_fd();
@@ -507,6 +620,31 @@ impl ResizeEvents {
             Err(Errno::INTR) => Ok(false),
             Err(error) => Err(error.into()),
         }
+    }
+
+    fn queue_input_pending(&self, input: &File) -> io::Result<bool> {
+        use std::os::fd::AsRawFd;
+        let tty = input.as_raw_fd();
+        let spec = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+        let mut events: [libc::kevent; 2] = unsafe { mem::zeroed() };
+        let queue = self.queue.as_ref().expect("queue is open").as_raw_fd();
+        // SAFETY: the kqueue and tty stay open, and `events` holds two notes.
+        let ready = unsafe {
+            libc::kevent(queue, std::ptr::null(), 0, events.as_mut_ptr(), 2, &spec)
+        };
+        if ready == -1 {
+            let error = io::Error::last_os_error();
+            return if error.kind() == io::ErrorKind::Interrupted {
+                Ok(false)
+            } else {
+                Err(error)
+            };
+        }
+        Ok(events.iter().take(ready as usize).any(|event| {
+            event.flags & libc::EV_ERROR as u16 == 0
+                && event.filter == libc::EVFILT_READ
+                && event.ident == tty as usize
+        }))
     }
 
     fn restore(&mut self) -> io::Result<()> {
