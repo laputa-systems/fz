@@ -447,6 +447,40 @@ class Acceptance(unittest.TestCase):
         self.assertIn(b"\x1b[33m", session.screen.raw, "matched characters need a highlight SGR")
         self.assert_exit(session, b"\r", 0, b"foo\n")
 
+    def test_escape_cancel_survives_sigwinch(self):
+        import threading
+
+        session = self.session(b"foo\nbar\n")
+        session.wait_for_lines([">", "foo", "bar"])
+        stop = threading.Event()
+
+        def flood():
+            while not stop.is_set():
+                if session.proc.poll() is not None:
+                    return
+                try:
+                    os.kill(session.proc.pid, signal.SIGWINCH)
+                except ProcessLookupError:
+                    return
+                time.sleep(0.002)
+
+        thread = threading.Thread(target=flood)
+        thread.start()
+        try:
+            session.send(ESC)
+            deadline = time.monotonic() + 0.5
+            while session.proc.poll() is None and time.monotonic() < deadline:
+                # Reading the PTY keeps a resize redraw from blocking in write
+                # before Escape can be consumed. drain returns once output stops.
+                session.drain(0.05)
+        finally:
+            stop.set()
+            thread.join(timeout=1)
+        if session.proc.poll() is None:
+            session.proc.kill()
+            self.fail("bare escape did not cancel while SIGWINCH was arriving")
+        self.assert_exit(session, b"", 1, b"")
+
     def test_escape_timeout_and_fragmented_arrow_sequence(self):
         # ESC remains ambiguous for KEYTIMEOUT; by itself it is cancel, while
         # bytes completing an arrow sequence before that timeout are navigation.
