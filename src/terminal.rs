@@ -238,6 +238,37 @@ fn restore_signal_mask(mask: &libc::sigset_t) -> io::Result<()> {
 }
 
 #[cfg(target_os = "macos")]
+fn arm_wake(write: &OwnedFd, after: Duration) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: `dup` of the open write end returns a new descriptor or -1.
+    let fd = unsafe { libc::dup(write.as_raw_fd()) };
+    if fd == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    if let Err(error) = configure_fd(fd) {
+        unsafe { libc::close(fd) };
+        return Err(error);
+    }
+    std::thread::spawn(move || {
+        // The read end can close before this write. A process-wide SIGPIPE
+        // disposition would turn that into a signal that kills fz.
+        let mut mask: libc::sigset_t = unsafe { mem::zeroed() };
+        unsafe {
+            libc::sigemptyset(&mut mask);
+            libc::sigaddset(&mut mask, libc::SIGPIPE);
+            libc::pthread_sigmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
+        }
+        std::thread::sleep(after);
+        let token = [1u8];
+        unsafe {
+            libc::write(fd, token.as_ptr().cast(), 1);
+            libc::close(fd);
+        }
+    });
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 fn configure_fd(fd: libc::c_int) -> io::Result<()> {
     // SAFETY: `fd` is an open descriptor owned by the caller.
     let fd_flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
@@ -399,9 +430,17 @@ impl ResizeEvents {
         let wake = self.wake_read.as_fd().as_raw_fd();
         let tty = input.as_fd().as_raw_fd();
         let nfds = wake.max(tty) + 1;
-        let timeout = timeout.map(|timeout| {
-            Timespec::try_from(timeout).expect("the fixed escape timeout fits in a timespec")
-        });
+        // select$DARWIN_EXTSN$NOCANCEL does not return from a positive timeout
+        // on the Darwin 25 GitHub runner. A byte on this pipe does wake it, so
+        // the deadline is delivered that way and select waits without a timeval.
+        let timeout = if let Some(duration) = timeout.filter(|duration| !duration.is_zero()) {
+            arm_wake(&self.wake_write, duration)?;
+            None
+        } else {
+            timeout.map(|timeout| {
+                Timespec::try_from(timeout).expect("the fixed escape timeout fits in a timespec")
+            })
+        };
         let mut readfds = vec![FdSetElement::default(); fd_set_num_elements(2, nfds)];
         fd_set_insert(&mut readfds, wake);
         fd_set_insert(&mut readfds, tty);
