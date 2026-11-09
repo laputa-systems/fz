@@ -189,7 +189,11 @@ class PtyFz:
         selector = selectors.DefaultSelector()
         try:
             selector.register(self.master, selectors.EVENT_READ)
-            while selector.select(timeout):
+            deadline = time.monotonic() + timeout
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    break
                 try:
                     data = os.read(self.master, 65536)
                 except OSError:
@@ -197,7 +201,6 @@ class PtyFz:
                 if not data:
                     break
                 self.screen.feed(data)
-                timeout = 0
         finally:
             selector.close()
 
@@ -257,9 +260,13 @@ class PtyFz:
         if self.proc.poll() is None:
             self.proc.kill()
             self.proc.wait()
-            raise AssertionError("fz did not exit after %r" % (keys,))
+            stderr = self.proc.stderr.read()
+            raise AssertionError(
+                "fz did not exit after %r\n%s" % (keys, stderr.decode("utf-8", "replace"))
+            )
         stdout = self.proc.stdout.read()
         stderr = self.proc.stderr.read()
+        stderr = stderr.replace(b"fz wait: kevent\n", b"").replace(b"fz wait: select\n", b"")
         return self.proc.returncode, stdout, stderr
 
     def restored(self):
