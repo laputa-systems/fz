@@ -475,6 +475,10 @@ impl ResizeEvents {
         })
     }
 
+    fn queue_is_kevent(&self) -> bool {
+        self.queue.is_some()
+    }
+
     fn wait_for_input(&self, input: &File, timeout: Option<Duration>) -> io::Result<Wait> {
         if self.queue.is_some() {
             return self.wait_on_queue(input, timeout);
@@ -741,7 +745,14 @@ impl Terminal {
         termios::tcsetattr(&input, OptionalActions::Now, &raw)?;
 
         let resize_events = match ResizeEvents::install(&input) {
-            Ok(resize_events) => resize_events,
+            Ok(resize_events) => {
+                #[cfg(target_os = "macos")]
+                eprintln!(
+                    "fz wait: {}",
+                    if resize_events.queue_is_kevent() { "kevent" } else { "select" }
+                );
+                resize_events
+            }
             Err(error) => {
                 let _ = termios::tcsetattr(&input, OptionalActions::Now, &original);
                 return Err(error);
