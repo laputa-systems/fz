@@ -23,12 +23,14 @@ Upstream acceptance mapping:
 """
 
 import codecs
+import faulthandler
 import os
 import pty
 import signal
 import subprocess
 import sys
 import termios
+import threading
 import time
 import unittest
 import unicodedata
@@ -517,10 +519,49 @@ class Acceptance(unittest.TestCase):
     def test_escape_timeout_and_fragmented_arrow_sequence(self):
         # ESC remains ambiguous for KEYTIMEOUT; by itself it is cancel, while
         # bytes completing an arrow sequence before that timeout are navigation.
-        session = self.session(b"foo\nbar\n")
-        session.wait_for_lines([">", "foo", "bar"])
-        session.send(ESC)
-        self.assert_exit(session, b"", 1, b"")
+        stop = threading.Event()
+
+        def dump_blocked_escape():
+            if stop.wait(12):
+                return
+            print("suite-escape-blocked", flush=True)
+            try:
+                blocked = signal.pthread_sigmask(signal.SIG_BLOCK, [])
+            except (AttributeError, OSError) as error:
+                blocked = error
+            print("signal-mask", blocked, flush=True)
+            print("itimer", signal.getitimer(signal.ITIMER_REAL), flush=True)
+            try:
+                listing = subprocess.check_output(
+                    ["ps", "-ax", "-o", "pid,ppid,stat,wchan,command"],
+                    text=True,
+                    timeout=2,
+                )
+                pids = {str(os.getpid())}
+                kept = []
+                for line in listing.splitlines():
+                    fields = line.split()
+                    if not fields:
+                        continue
+                    if fields[0] == "PID" or fields[0] in pids or (len(fields) > 1 and fields[1] in pids):
+                        kept.append(line)
+                        if fields[0].isdigit():
+                            pids.add(fields[0])
+                print("\n".join(kept), flush=True)
+            except (OSError, subprocess.SubprocessError) as error:
+                print("ps failed", error, flush=True)
+            faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+            os._exit(86)
+
+        watcher = threading.Thread(target=dump_blocked_escape, daemon=True)
+        watcher.start()
+        try:
+            session = self.session(b"foo\nbar\n")
+            session.wait_for_lines([">", "foo", "bar"])
+            session.send(ESC)
+            self.assert_exit(session, b"", 1, b"")
+        finally:
+            stop.set()
 
         # The fragments only exercise the timeout if the harness delivers them
         # inside fzy's 25 ms window. A loaded runner can overshoot a 5 ms sleep,
