@@ -266,7 +266,6 @@ class PtyFz:
             )
         stdout = self.proc.stdout.read()
         stderr = self.proc.stderr.read()
-        stderr = stderr.replace(b"fz wait: kevent\n", b"").replace(b"fz wait: select\n", b"")
         return self.proc.returncode, stdout, stderr
 
     def restored(self):
