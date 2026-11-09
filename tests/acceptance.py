@@ -23,6 +23,7 @@ Upstream acceptance mapping:
 """
 
 import codecs
+import errno
 import os
 import pty
 import signal
@@ -295,6 +296,8 @@ class PtyFz:
     def _wait(self, timeout):
         stop = threading.Event()
         worker = threading.Thread(target=self._pump_until, args=(stop,), daemon=True)
+        self._pump_stop = stop
+        self._pump = worker
         worker.start()
         try:
             deadline = time.monotonic() + timeout
@@ -305,7 +308,18 @@ class PtyFz:
             self.proc.wait()
         finally:
             stop.set()
-            worker.join(timeout=1)
+            worker.join(timeout=0.05)
+
+    def _release_fd(self, name):
+        fd = getattr(self, name)
+        setattr(self, name, None)
+        if fd is None:
+            return
+        try:
+            os.close(fd)
+        except OSError as error:
+            if error.errno != errno.EBADF:
+                raise
 
     def finish(self, keys=b"", timeout=3.0):
         if keys:
@@ -326,13 +340,20 @@ class PtyFz:
     def close(self):
         if self.proc.poll() is None:
             self._wait(1.0)
+        stop = getattr(self, "_pump_stop", None)
+        worker = getattr(self, "_pump", None)
+        if stop is not None:
+            stop.set()
+        # Closing the master unblocks a read that Darwin 25 will not time out.
+        # That teardown can revoke the slave, so a second close reports EBADF.
+        self._release_fd("master")
+        if worker is not None:
+            worker.join(timeout=1)
+            self._pump = None
+        self._release_fd("slave")
         for stream in (self.proc.stdin, self.proc.stdout, self.proc.stderr):
             if stream and not stream.closed:
                 stream.close()
-        if self.master is not None:
-            os.close(self.master)
-            self.master = None
-        os.close(self.slave)
 
 
 def run_fz(args=(), data=b""):
