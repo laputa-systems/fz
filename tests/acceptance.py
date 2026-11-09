@@ -25,7 +25,6 @@ Upstream acceptance mapping:
 import codecs
 import os
 import pty
-import selectors
 import signal
 import subprocess
 import sys
@@ -145,6 +144,9 @@ class PtyFz:
         import fcntl
         import struct
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+        # Darwin can report the master readable and then block in read.
+        flags = fcntl.fcntl(self.master, fcntl.F_GETFL)
+        fcntl.fcntl(self.master, fcntl.F_SETFL, flags | os.O_NONBLOCK)
         # macOS invalidates an idle slave FD when the child closes its last
         # handle.  The paired master reports the same shared terminal state
         # and remains queryable, so use it for the restoration assertion.
@@ -186,23 +188,20 @@ class PtyFz:
     def drain(self, timeout=0.03):
         if self.master is None:
             return
-        selector = selectors.DefaultSelector()
-        try:
-            selector.register(self.master, selectors.EVENT_READ)
-            deadline = time.monotonic() + timeout
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0 or not selector.select(remaining):
-                    break
-                try:
-                    data = os.read(self.master, 65536)
-                except OSError:
-                    break
-                if not data:
-                    break
-                self.screen.feed(data)
-        finally:
-            selector.close()
+        # selector.select on Darwin 25 can report the master readable while
+        # the following read blocks, which never returns to the caller's deadline.
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                data = os.read(self.master, 65536)
+            except BlockingIOError:
+                time.sleep(min(0.005, deadline - time.monotonic()))
+                continue
+            except OSError:
+                break
+            if not data:
+                break
+            self.screen.feed(data)
 
     def hangup(self):
         """Give the child a terminal EOF without closing its stdio pipes."""
