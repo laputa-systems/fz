@@ -183,7 +183,20 @@ class PtyFz:
     def send(self, data):
         if self.master is None:
             raise AssertionError("cannot send input after PTY hangup")
-        os.write(self.master, data.encode() if isinstance(data, str) else data)
+        payload = data.encode() if isinstance(data, str) else data
+        view = memoryview(payload)
+        deadline = time.monotonic() + 2
+        while view:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise AssertionError("timed out writing %r to fz" % (bytes(payload),))
+            try:
+                wrote = self._read_master_like(lambda: os.write(self.master, view), remaining)
+            except OSError as error:
+                raise AssertionError("write to fz failed: %s" % error) from error
+            if wrote is None:
+                continue
+            view = view[wrote:]
 
     def drain(self, timeout=0.03):
         if self.master is None:
@@ -194,7 +207,7 @@ class PtyFz:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                data = self._read_master(deadline - time.monotonic())
+                data = self._read_master_like(lambda: os.read(self.master, 65536), deadline - time.monotonic())
             except OSError:
                 break
             if data is None:
@@ -203,15 +216,15 @@ class PtyFz:
                 break
             self.screen.feed(data)
 
-    def _read_master(self, seconds):
+    def _read_master_like(self, operation, seconds):
         if seconds <= 0:
             return None
         def handle(signum, frame):
             raise TimeoutError
         previous = signal.signal(signal.SIGALRM, handle)
-        signal.setitimer(signal.ITIMER_REAL, seconds)
+        signal.setitimer(signal.ITIMER_REAL, max(seconds, 0.001))
         try:
-            return os.read(self.master, 65536)
+            return operation()
         except (TimeoutError, InterruptedError, BlockingIOError):
             return None
         finally:
@@ -504,9 +517,13 @@ class Acceptance(unittest.TestCase):
     def test_escape_timeout_and_fragmented_arrow_sequence(self):
         # ESC remains ambiguous for KEYTIMEOUT; by itself it is cancel, while
         # bytes completing an arrow sequence before that timeout are navigation.
+        print("ENTER escape-timeout", flush=True)
         session = self.session(b"foo\nbar\n")
+        print("escape-timeout session", flush=True)
         session.wait_for_lines([">", "foo", "bar"])
+        print("escape-timeout screen", flush=True)
         session.send(ESC)
+        print("escape-timeout sent", flush=True)
         self.assert_exit(session, b"", 1, b"")
 
         # The fragments only exercise the timeout if the harness delivers them
