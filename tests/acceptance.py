@@ -277,17 +277,41 @@ class PtyFz:
             time.sleep(0.01)
         raise AssertionError("fz did not redraw after SIGWINCH")
 
+    def _pump_until(self, stop):
+        # Darwin 25 will not finish exiting a PTY client while the master still
+        # holds the last redraw. The waiter has to be a different thread.
+        while not stop.is_set() and self.master is not None:
+            try:
+                data = os.read(self.master, 65536)
+            except BlockingIOError:
+                time.sleep(0.005)
+                continue
+            except OSError:
+                return
+            if not data:
+                return
+            self.screen.feed(data)
+
+    def _wait(self, timeout):
+        stop = threading.Event()
+        worker = threading.Thread(target=self._pump_until, args=(stop,), daemon=True)
+        worker.start()
+        try:
+            deadline = time.monotonic() + timeout
+            while self.proc.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            if self.proc.poll() is None:
+                self.proc.kill()
+            self.proc.wait()
+        finally:
+            stop.set()
+            worker.join(timeout=1)
+
     def finish(self, keys=b"", timeout=3.0):
         if keys:
             self.send(keys)
-        deadline = time.monotonic() + timeout
-        while self.proc.poll() is None and time.monotonic() < deadline:
-            self.drain()
-            time.sleep(0.01)
-        self.drain(0.1)
-        if self.proc.poll() is None:
-            self.proc.kill()
-            self.proc.wait()
+        self._wait(timeout)
+        if self.proc.returncode is None or self.proc.returncode < 0:
             stderr = self.proc.stderr.read()
             raise AssertionError(
                 "fz did not exit after %r\n%s" % (keys, stderr.decode("utf-8", "replace"))
@@ -301,8 +325,7 @@ class PtyFz:
 
     def close(self):
         if self.proc.poll() is None:
-            self.proc.kill()
-            self.proc.wait()
+            self._wait(1.0)
         for stream in (self.proc.stdin, self.proc.stdout, self.proc.stderr):
             if stream and not stream.closed:
                 stream.close()
