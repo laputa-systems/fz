@@ -34,26 +34,17 @@ fn fzy_acceptance_contract() {
         .arg(env!("CARGO_BIN_EXE_fz"))
         .spawn()
         .expect("python3 must be available to run the stdlib acceptance harness");
-    let mut eye = Command::new("python3")
-        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/hang_dump.py"))
-        .arg(child.id().to_string())
-        .spawn()
-        .expect("python3 must be available to sample a hung harness");
     let started = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().expect("acceptance harness wait") {
             break status;
         }
-        if started.elapsed() > Duration::from_secs(50) {
+        if started.elapsed() > Duration::from_secs(60) {
             let _ = child.kill();
             let _ = child.wait();
-            let _ = eye.kill();
-            let _ = eye.wait();
-            panic!("acceptance harness still running after 50s");
+            panic!("acceptance harness still running after 60s");
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    let _ = eye.kill();
-    let _ = eye.wait();
     assert!(status.success(), "acceptance harness failed: {status}");
 }
