@@ -517,13 +517,9 @@ class Acceptance(unittest.TestCase):
     def test_escape_timeout_and_fragmented_arrow_sequence(self):
         # ESC remains ambiguous for KEYTIMEOUT; by itself it is cancel, while
         # bytes completing an arrow sequence before that timeout are navigation.
-        print("ENTER escape-timeout", flush=True)
         session = self.session(b"foo\nbar\n")
-        print("escape-timeout session", flush=True)
         session.wait_for_lines([">", "foo", "bar"])
-        print("escape-timeout screen", flush=True)
         session.send(ESC)
-        print("escape-timeout sent", flush=True)
         self.assert_exit(session, b"", 1, b"")
 
         # The fragments only exercise the timeout if the harness delivers them
