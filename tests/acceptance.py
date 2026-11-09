@@ -188,20 +188,35 @@ class PtyFz:
     def drain(self, timeout=0.03):
         if self.master is None:
             return
-        # selector.select on Darwin 25 can report the master readable while
-        # the following read blocks, which never returns to the caller's deadline.
+        # Darwin 25 can ignore O_NONBLOCK on a PTY master and block in read.
+        # A deadline checked only before the read never runs. SIGALRM interrupts
+        # that read.
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                data = os.read(self.master, 65536)
-            except BlockingIOError:
-                time.sleep(min(0.005, deadline - time.monotonic()))
-                continue
+                data = self._read_master(deadline - time.monotonic())
             except OSError:
                 break
+            if data is None:
+                continue
             if not data:
                 break
             self.screen.feed(data)
+
+    def _read_master(self, seconds):
+        if seconds <= 0:
+            return None
+        def handle(signum, frame):
+            raise TimeoutError
+        previous = signal.signal(signal.SIGALRM, handle)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            return os.read(self.master, 65536)
+        except (TimeoutError, InterruptedError, BlockingIOError):
+            return None
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
 
     def hangup(self):
         """Give the child a terminal EOF without closing its stdio pipes."""
