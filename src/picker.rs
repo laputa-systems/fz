@@ -127,7 +127,7 @@ impl<W: Write> Renderer<W> {
         self.clear_line()?;
 
         if options.show_info || options.multi {
-            self.write_bytes(b"\n")?;
+            self.write_bytes(b"\r\n")?;
             let mut bytes = [0u8; 96];
             let capacity = bytes.len();
             let mut remaining = &mut bytes[..];
@@ -161,7 +161,7 @@ impl<W: Write> Renderer<W> {
         }
         let mut rows_used = 0usize;
         for index in start..end {
-            self.write_bytes(b"\n")?;
+            self.write_bytes(b"\r\n")?;
             self.clear_line()?;
             let score = options.show_scores.then(|| choices.getscore(index)).flatten();
             let marked = options.multi && choices.source_index(index)
@@ -176,7 +176,7 @@ impl<W: Write> Renderer<W> {
             }
         }
         for _ in rows_used..budget {
-            self.write_bytes(b"\n")?;
+            self.write_bytes(b"\r\n")?;
             self.clear_line()?;
         }
 
@@ -272,7 +272,7 @@ impl<W: Write> Renderer<W> {
             let char_width = if candidate[index] == b'\n' { 1 } else { scalar_width(scalar) };
             if char_width > 0 && column + char_width > width {
                 if rows >= max_rows { break; }
-                self.write_bytes(b"\n")?;
+                self.write_bytes(b"\r\n")?;
                 self.set_column(0)?;
                 self.clear_line()?;
                 rows += 1;
@@ -348,7 +348,7 @@ impl<W: Write> Renderer<W> {
     }
 
     fn newline(&mut self) -> io::Result<()> {
-        self.write_bytes(b"\x1b[K\n")
+        self.write_bytes(b"\x1b[K\r\n")
     }
 
     fn set_column(&mut self, column: usize) -> io::Result<()> {
