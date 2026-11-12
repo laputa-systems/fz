@@ -582,6 +582,7 @@ pub struct Terminal {
     output: BufWriter<File>,
     original: Termios,
     restore_needed: bool,
+    bracketed_paste: bool,
 }
 
 impl Terminal {
@@ -631,7 +632,9 @@ impl Terminal {
             output: BufWriter::with_capacity(16 * 1024, output),
             original,
             restore_needed: true,
+            bracketed_paste: claim_foreground,
         };
+        if terminal.bracketed_paste { terminal.output.write_all(b"\x1b[?2004h")?; }
         terminal.output.write_all(b"\x1b[0m")?;
         terminal.output.flush()?;
         Ok(terminal)
@@ -731,6 +734,9 @@ impl Terminal {
     }
 
     fn restore(&mut self) -> io::Result<()> {
+        let paste_result = if self.bracketed_paste {
+            self.output.write_all(b"\x1b[?2004l").and_then(|()| self.output.flush())
+        } else { Ok(()) };
         let termios_result = if self.restore_needed {
             loop {
                 match termios::tcsetattr(&self.input, OptionalActions::Now, &self.original) {
@@ -753,7 +759,7 @@ impl Terminal {
         let resize_result = self.resize_events.restore();
         let foreground_result = self.foreground.as_mut().map_or(Ok(()), Foreground::restore);
         let termination_result = self.termination.restore();
-        termios_result.and(resize_result).and(foreground_result).and(termination_result)
+        paste_result.and(termios_result).and(resize_result).and(foreground_result).and(termination_result)
     }
 
 }
