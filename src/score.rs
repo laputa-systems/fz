@@ -20,7 +20,7 @@ fn zero_byte_mask(word: u64) -> u64 {
 }
 
 #[inline]
-pub(crate) fn find_either(haystack: &[u8], first: u8, second: u8) -> Option<usize> {
+pub fn find_either(haystack: &[u8], first: u8, second: u8) -> Option<usize> {
     let first_word = u64::from(first) * BYTE_WORD_ONES;
     let second_word = u64::from(second) * BYTE_WORD_ONES;
     let (words, remainder) = haystack.as_chunks::<8>();

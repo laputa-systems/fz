@@ -1,6 +1,6 @@
 # Architecture
 
-`src/main.rs` parses options, reads candidate bytes, and chooses interactive or filter mode. `src/lib.rs` stores candidates and ranks matches. `src/score.rs` implements fzy matching, scoring, and highlight positions. `src/terminal.rs` owns the raw terminal session and rendering.
+`src/main.rs` retains the standalone process entry point. `src/cli.rs` parses options, reads candidate bytes, and chooses interactive or filter mode. `src/lib.rs` stores candidates and ranks matches. `src/score.rs` implements fzy matching, scoring, and highlight positions. `src/terminal.rs` owns the raw terminal session and rendering.
 
 ## Matching and ranking
 
@@ -19,3 +19,26 @@ Interactive mode reads candidates from stdin and opens the configured terminal d
 Result rows wrap at the terminal width instead of truncating, so a long candidate occupies as many physical rows as it needs within the `--lines` budget; later candidates are dropped from view when the budget is full. Unlike fzy, which clips a row at the right edge, wrapping keeps the tail of entries such as long process argument lists readable on narrow terminals. Wide and combining characters count by display width when wrapping.
 
 The binary uses a custom entry point to skip Rust runtime startup. It keeps the default `SIGPIPE` disposition and flushes its own stdout before returning.
+
+## Embedding
+
+`Picker` owns query editing, focus, marking order, and `Choices`. It returns
+`Outcome::Accepted` with stable `CandidateId` values, `Query`, `NoMatch`, or
+`Cancelled`. Duplicate payloads retain separate IDs. Retrieve payload bytes
+with `Picker::source`. The caller frames selected output.
+
+`Picker::feed`, `paste`, `resize`, `render`, and `clear` have no process or
+terminal ownership effects. The host supplies events and a writer, checks
+resize errors before acceptance, and restores its terminal before using IDs.
+`PickerConfig::workers` defaults are caller policy. Use one worker when embedding
+in a process that later forks. Search workers are scoped and joined.
+
+`cli::run` implements the executable contract for a fresh worker process. Its
+standalone terminal adapter owns termios and resize delivery. Do not call that
+adapter over an existing host event loop. The library installs no panic hook
+and never exits the process. Custom process entry and SIGPIPE assumptions stay
+in `main.rs`.
+
+`find_either` and `has_match` also support borrowed byte corpora. The host can
+retain its own ranking and Unicode policy without invoking fzy scoring or its
+1024-byte highlight limit.

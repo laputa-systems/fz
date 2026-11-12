@@ -1,5 +1,10 @@
+pub mod cli;
+mod terminal;
+mod picker;
+pub use picker::{CandidateId, Outcome, Picker, PickerConfig};
+
 mod score;
-pub use score::{has_match, match_score, match_positions};
+pub use score::{find_either, has_match, match_score, match_positions};
 
 fn rank_into(needle: &[u8], candidates: &[Vec<u8>], results: &mut Vec<(usize, f64)>) {
     results.clear();
@@ -261,7 +266,7 @@ impl Candidates {
         Self { bytes, offsets, delimiter: Some(delimiter) }
     }
 
-    fn from_records(records: Vec<Vec<u8>>) -> Self {
+    pub fn from_records(records: Vec<Vec<u8>>) -> Self {
         let mut bytes = Vec::with_capacity(records.iter().map(Vec::len).sum());
         let mut offsets = Vec::with_capacity(records.len() + 1);
         for record in records {
