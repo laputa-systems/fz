@@ -526,8 +526,48 @@ impl Drop for ResizeEvents {
 }
 
 /// A raw-mode terminal. Dropping it always puts its saved termios state back.
+struct Foreground {
+    terminal: File,
+    group: rustix::process::Pid,
+    ttou: libc::sigaction,
+    active: bool,
+}
+
+impl Foreground {
+    fn claim(terminal: &File) -> io::Result<Option<Self>> {
+        let group = termios::tcgetpgrp(terminal)?;
+        let current = rustix::process::getpgrp();
+        if group == current { return Ok(None); }
+        let terminal = terminal.try_clone()?;
+        // SAFETY: sigaction records are valid, writable ABI storage; SIG_IGN
+        // prevents job-control stops only during the explicit worker handoff.
+        let mut action: libc::sigaction = unsafe { mem::zeroed() };
+        action.sa_sigaction = libc::SIG_IGN;
+        let mut ttou: libc::sigaction = unsafe { mem::zeroed() };
+        if unsafe { libc::sigemptyset(&mut action.sa_mask) } == -1
+            || unsafe { libc::sigaction(libc::SIGTTOU, &action, &mut ttou) } == -1
+        { return Err(io::Error::last_os_error()); }
+        let mut guard = Self { terminal, group, ttou, active: true };
+        if let Err(error) = termios::tcsetpgrp(&guard.terminal, current) {
+            let _ = guard.restore();
+            return Err(error.into());
+        }
+        Ok(Some(guard))
+    }
+    fn restore(&mut self) -> io::Result<()> {
+        if !self.active { return Ok(()); }
+        termios::tcsetpgrp(&self.terminal, self.group)?;
+        // SAFETY: ttou was captured in this process, and restores the caller's disposition.
+        if unsafe { libc::sigaction(libc::SIGTTOU, &self.ttou, std::ptr::null_mut()) } == -1 { return Err(io::Error::last_os_error()); }
+        self.active = false;
+        Ok(())
+    }
+}
+impl Drop for Foreground { fn drop(&mut self) { let _ = self.restore(); } }
+
 pub struct Terminal {
     resize_events: ResizeEvents,
+    foreground: Option<Foreground>,
     input: File,
     output: BufWriter<File>,
     original: Termios,
@@ -536,7 +576,7 @@ pub struct Terminal {
 
 impl Terminal {
     /// Opens `path` for input and output, then switches input to fzy's raw mode.
-    pub fn open(path: &Path) -> io::Result<Self> {
+    pub fn open(path: &Path, claim_foreground: bool) -> io::Result<Self> {
         let input = OpenOptions::new().read(true).open(path)?;
         let output = OpenOptions::new().write(true).open(path)?;
         // select on a macOS tty can report readability when a following read
@@ -555,6 +595,7 @@ impl Terminal {
             }
         }
 
+        let foreground = if claim_foreground { Foreground::claim(&input)? } else { None };
         let original = termios::tcgetattr(&input)?;
         let mut raw = original.clone();
         raw.input_modes.remove(InputModes::ICRNL);
@@ -572,6 +613,7 @@ impl Terminal {
 
         let mut terminal = Self {
             resize_events,
+            foreground,
             input,
             output: BufWriter::with_capacity(16 * 1024, output),
             original,
@@ -666,7 +708,8 @@ impl Terminal {
             Ok(())
         };
         let resize_result = self.resize_events.restore();
-        termios_result.and(resize_result)
+        let foreground_result = self.foreground.as_mut().map_or(Ok(()), Foreground::restore);
+        termios_result.and(resize_result).and(foreground_result)
     }
 
 }

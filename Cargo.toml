@@ -30,3 +30,5 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = true
+
+[workspace]
