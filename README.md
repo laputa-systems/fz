@@ -4,14 +4,13 @@
 
 ## Install
 
-Download a prerelease from [GitHub Releases](https://github.com/laputa-systems/fz/releases). Each release publishes `SHA256SUMS` and two static Linux archives:
+Download a prerelease from [GitHub Releases](https://github.com/laputa-systems/fz/releases). Each release publishes `SHA256SUMS` and the macOS arm64 and two static Linux archives:
 
 | Platform | Archive |
 | --- | --- |
+| macOS arm64 | `fz-aarch64-apple-darwin.zip` |
 | Linux x86_64 | `fz-x86_64-unknown-linux-musl-static.zip` |
 | Linux arm64 | `fz-aarch64-unknown-linux-musl-static.zip` |
-
-The release workflow builds macOS arm64 and does not publish it. Build that binary from a checkout; see [Release](docs/release.md).
 
 Extract an archive and put its executable on your `PATH`:
 

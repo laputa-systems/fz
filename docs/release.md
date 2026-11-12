@@ -18,4 +18,4 @@ Linux release builds use the image in [`Dockerfile`](../Dockerfile). The [releas
 
 ## Published archives
 
-The workflow is manual and runs only on the default branch. It builds macOS arm64, Linux x86_64 musl, and Linux arm64 musl. It runs `make test-ci` for the macOS build only. It then publishes prerelease `release-<commit-sha>` with `SHA256SUMS` and the two static Linux zips named in the [installation instructions](../README.md). The macOS binary is not attached.
+The workflow is manual and runs only on the default branch. It builds macOS arm64, Linux x86_64 musl, and Linux arm64 musl. It runs `make test-ci` for the macOS build only. It then publishes prerelease `release-<commit-sha>` with `SHA256SUMS` and the macOS arm64 and two static Linux zips named in the [installation instructions](../README.md).
