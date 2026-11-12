@@ -569,6 +569,7 @@ pub struct Terminal {
     resize_events: ResizeEvents,
     foreground: Option<Foreground>,
     input: File,
+    pending: Option<File>,
     output: BufWriter<File>,
     original: Termios,
     restore_needed: bool,
@@ -576,7 +577,7 @@ pub struct Terminal {
 
 impl Terminal {
     /// Opens `path` for input and output, then switches input to fzy's raw mode.
-    pub fn open(path: &Path, claim_foreground: bool) -> io::Result<Self> {
+    pub fn open(path: &Path, claim_foreground: bool, pending: Option<File>) -> io::Result<Self> {
         let input = OpenOptions::new().read(true).open(path)?;
         let output = OpenOptions::new().write(true).open(path)?;
         // select on a macOS tty can report readability when a following read
@@ -614,6 +615,7 @@ impl Terminal {
         let mut terminal = Self {
             resize_events,
             foreground,
+            pending,
             input,
             output: BufWriter::with_capacity(16 * 1024, output),
             original,
@@ -672,11 +674,18 @@ impl Terminal {
     }
 
     fn wait_for_input(&self, timeout: Option<Duration>) -> io::Result<Wait> {
+        if self.pending.is_some() { return Ok(Wait::Ready); }
         self.resize_events.wait_for_input(&self.input, timeout)
     }
 
     fn read_byte(&mut self) -> io::Result<Option<u8>> {
         let mut byte = [0u8; 1];
+        if let Some(pending) = self.pending.as_mut() {
+            match pending.read(&mut byte)? {
+                0 => { self.pending = None; return Err(io::ErrorKind::WouldBlock.into()); }
+                _ => return Ok(Some(byte[0])),
+            }
+        }
         loop {
             match self.input.read(&mut byte) {
                 Ok(0) => return Ok(None),

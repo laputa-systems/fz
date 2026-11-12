@@ -133,7 +133,7 @@ fn read_candidates(delimiter: u8) -> io::Result<crate::Candidates> {
     Ok(crate::Candidates::from_input(input, delimiter))
 }
 
-fn run_options(options: Options, claim_foreground: bool) -> io::Result<bool> {
+fn run_options(options: Options, claim_foreground: bool, input: Option<std::fs::File>) -> io::Result<bool> {
     if let Some(query) = &options.filter {
         let mut choices = crate::Choices::from_candidates(read_candidates(options.delimiter)?);
         choices.set_workers(options.workers);
@@ -154,9 +154,9 @@ fn run_options(options: Options, claim_foreground: bool) -> io::Result<bool> {
     // itself a terminal, retain canonical input until its candidate EOF.
     let (mut terminal, candidates) = if io::stdin().is_terminal() {
         let candidates = read_candidates(options.delimiter)?;
-        (terminal::Terminal::open(&options.tty, claim_foreground)?, candidates)
+        (terminal::Terminal::open(&options.tty, claim_foreground, input)?, candidates)
     } else {
-        let terminal = terminal::Terminal::open(&options.tty, claim_foreground)?;
+        let terminal = terminal::Terminal::open(&options.tty, claim_foreground, input)?;
         (terminal, read_candidates(options.delimiter)?)
     };
     let mut picker = crate::Picker::new(candidates, crate::PickerConfig {
@@ -182,18 +182,18 @@ fn run_options(options: Options, claim_foreground: bool) -> io::Result<bool> {
 }
 
 /// Run the standalone CLI contract in a process whose terminal and signals it owns.
-pub fn run(args: impl Iterator<Item = Vec<u8>>) -> c_int { dispatch(args, false) }
+pub fn run(args: impl Iterator<Item = Vec<u8>>) -> c_int { dispatch(args, false, None) }
 
 /// Run in a fresh embedding worker, temporarily taking and restoring the
 /// controlling terminal's foreground group for interactive substitutions.
-pub fn run_in_foreground(args: impl Iterator<Item = Vec<u8>>) -> c_int { dispatch(args, true) }
+pub fn run_in_foreground(args: impl Iterator<Item = Vec<u8>>, input: Option<std::fs::File>) -> c_int { dispatch(args, true, input) }
 
-fn dispatch(args: impl Iterator<Item = Vec<u8>>, claim_foreground: bool) -> c_int {
+fn dispatch(args: impl Iterator<Item = Vec<u8>>, claim_foreground: bool, input: Option<std::fs::File>) -> c_int {
     match Options::parse(args) {
         Ok(None) => 0,
         Ok(Some(options)) => {
             let multi = options.multi;
-            match run_options(options, claim_foreground) {
+            match run_options(options, claim_foreground, input) {
                 Ok(true) => 0,
                 Ok(false) => 1,
                 Err(error) => {
