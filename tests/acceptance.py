@@ -912,6 +912,15 @@ class MultiSelectionTests(unittest.TestCase):
             finally:
                 session.close()
 
+    def test_narrow_info_keeps_mark_count_on_one_row(self):
+        session = PtyFz(b"\n".join(b"item%04d" % i for i in range(1000)), ("--multi",), rows=4, cols=20)
+        try:
+            session.wait_for_prefix([">", "[0 selected]", "[ ] item0000", "[ ] item0001"])
+            self.assertEqual(session.finish(b"\x03"), (1, b"", b""))
+            self.assertTrue(session.restored())
+        finally:
+            session.close()
+
     def test_tiny_terminal_rejects_invisible_selection(self):
         session = PtyFz(b"one\ntwo\n", ("--multi",), rows=2)
         try:

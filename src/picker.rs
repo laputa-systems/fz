@@ -127,16 +127,19 @@ impl<W: Write> Renderer<W> {
         self.clear_line()?;
 
         if options.show_info || options.multi {
-            self.write_bytes(b"\n[")?;
-            self.write_usize(available)?;
-            self.write_bytes(b"/")?;
-            self.write_usize(choices.len())?;
-            self.write_bytes(b"]")?;
-            if options.multi {
-                self.write_bytes(b" [")?;
-                self.write_usize(state.marked.len())?;
-                self.write_bytes(b" selected]")?;
+            self.write_bytes(b"\n")?;
+            let mut bytes = [0u8; 96];
+            let capacity = bytes.len();
+            let mut remaining = &mut bytes[..];
+            write!(remaining, "[{available}/{}]", choices.len())?;
+            if options.multi { write!(remaining, " [{} selected]", state.marked.len())?; }
+            let mut length = capacity - remaining.len();
+            if options.multi && length >= self.width {
+                let mut remaining = &mut bytes[..];
+                write!(remaining, "[{} selected]", state.marked.len())?;
+                length = (capacity - remaining.len()).min(self.width.saturating_sub(1));
             }
+            self.write_bytes(&bytes[..length])?;
             self.clear_line()?;
         }
 
@@ -308,10 +311,6 @@ impl<W: Write> Renderer<W> {
 
     fn write_bytes(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.output.write_all(bytes)
-    }
-
-    fn write_usize(&mut self, value: usize) -> io::Result<()> {
-        write!(self.output, "{value}")
     }
 
     fn flush(&mut self) -> io::Result<()> {
