@@ -770,7 +770,6 @@ fn previous_boundary(bytes: &[u8], cursor: usize) -> usize {
     }
     position
 }
-
 fn next_boundary(bytes: &[u8], cursor: usize) -> usize {
     if cursor >= bytes.len() {
         return bytes.len();
