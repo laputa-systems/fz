@@ -21,5 +21,11 @@ pub unsafe extern "C" fn main(argc: c_int, argv: *const *const c_char) -> c_int 
     let args = (1..usize::try_from(argc).unwrap_or(0))
         // SAFETY: the process entry contract is that `argv` holds `argc` non-null C strings, and this range stays below `argc`.
         .map(|index| unsafe { CStr::from_ptr(*argv.add(index)) }.to_bytes().to_vec());
-    fz::cli::run(args)
+    let status = fz::cli::run(args);
+    if matches!(status - 128, libc::SIGHUP | libc::SIGTERM | libc::SIGQUIT) {
+        // SAFETY: the terminal adapter has restored the caller's state. The
+        // executable re-raises handled termination with its default disposition.
+        unsafe { libc::signal(status - 128, libc::SIG_DFL); libc::raise(status - 128); }
+    }
+    status
 }

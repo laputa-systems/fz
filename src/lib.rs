@@ -1,5 +1,6 @@
 pub mod cli;
 mod terminal;
+mod termination;
 mod picker;
 pub use picker::{CandidateId, Outcome, Picker, PickerConfig};
 

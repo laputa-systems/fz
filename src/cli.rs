@@ -123,19 +123,31 @@ impl Options {
 
 // fzy skips empty records. In newline mode the first NUL terminates the input
 // visible to its C string tokenizer; in NUL mode newlines are candidate bytes.
-fn read_candidates(delimiter: u8) -> io::Result<crate::Candidates> {
+fn read_candidates(delimiter: u8, terminal: Option<&terminal::Terminal>) -> io::Result<crate::Candidates> {
     let mut input = Vec::new();
     // A File reader uses the remaining file length as its allocation hint.
     // This avoids geometric input growth when stdin is a redirected file,
     // while pipes retain streaming reads. No buffered stdin reads precede it.
     let mut source = std::fs::File::from(rustix::io::dup(rustix::stdio::stdin())?);
-    source.read_to_end(&mut input)?;
+    if let Some(terminal) = terminal {
+        if let Ok(metadata) = source.metadata() { input.reserve_exact(usize::try_from(metadata.len()).unwrap_or(0)); }
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            terminal.wait_candidate_input(&source)?;
+            match source.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => input.extend_from_slice(&buffer[..count]),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            }
+        }
+    } else { source.read_to_end(&mut input)?; }
     Ok(crate::Candidates::from_input(input, delimiter))
 }
 
 fn run_options(options: Options, claim_foreground: bool, input: Option<std::fs::File>) -> io::Result<bool> {
     if let Some(query) = &options.filter {
-        let mut choices = crate::Choices::from_candidates(read_candidates(options.delimiter)?);
+        let mut choices = crate::Choices::from_candidates(read_candidates(options.delimiter, None)?);
         choices.set_workers(options.workers);
         choices.search(query);
         choices.rank_all();
@@ -153,11 +165,11 @@ fn run_options(options: Options, claim_foreground: bool, input: Option<std::fs::
     // queued without canonical editing or CR-to-NL translation. When stdin is
     // itself a terminal, retain canonical input until its candidate EOF.
     let (mut terminal, candidates) = if io::stdin().is_terminal() {
-        let candidates = read_candidates(options.delimiter)?;
+        let candidates = read_candidates(options.delimiter, None)?;
         (terminal::Terminal::open(&options.tty, claim_foreground, input)?, candidates)
     } else {
         let terminal = terminal::Terminal::open(&options.tty, claim_foreground, input)?;
-        (terminal, read_candidates(options.delimiter)?)
+        { let candidates = read_candidates(options.delimiter, Some(&terminal))?; (terminal, candidates) }
     };
     let mut picker = crate::Picker::new(candidates, crate::PickerConfig {
         lines: options.lines, prompt: options.prompt.into_owned(), query: options.query,
@@ -197,6 +209,7 @@ fn dispatch(args: impl Iterator<Item = Vec<u8>>, claim_foreground: bool, input: 
                 Ok(true) => 0,
                 Ok(false) => 1,
                 Err(error) => {
+                    if let Some(signal) = error.get_ref().and_then(|cause| cause.downcast_ref::<crate::termination::Interrupted>()) { return 128 + signal.0; }
                     eprintln!("fz: {error}");
                     if multi { 2 } else { 1 }
                 }

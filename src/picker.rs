@@ -55,7 +55,7 @@ impl Picker {
     /// both a visible row and enough columns for its mark and candidate.
     pub fn resize(&mut self, width: usize, height: usize) -> io::Result<()> {
         self.state.lines = self.config.lines.min(height.saturating_sub(1 + usize::from(self.show_info())));
-        if self.config.multi && (self.state.lines == 0 || width <= 4) {
+        if self.config.multi && (self.state.lines == 0 || width <= self.config.prompt.len().max(4)) {
             return Err(io::Error::other("terminal too small for multi-select results"));
         }
         Ok(())
@@ -123,7 +123,7 @@ impl<W: Write> Renderer<W> {
 
         self.set_column(0)?;
         self.write_bytes(&options.prompt)?;
-        self.write_bytes(&state.query)?;
+        self.draw_query(state, options)?;
         self.clear_line()?;
 
         if options.show_info || options.multi {
@@ -183,8 +183,38 @@ impl<W: Write> Renderer<W> {
         }
         self.set_column(0)?;
         self.write_bytes(&options.prompt)?;
-        self.write_bytes(&state.query[..state.cursor])?;
+        let start = self.query_start(state, options);
+        self.write_bytes(&state.query[start..state.cursor])?;
         self.flush()
+    }
+
+    fn query_start(&self, state: &Editor, options: &PickerConfig) -> usize {
+        let budget = self.width.saturating_sub(options.prompt.len() + 1);
+        let mut start = state.cursor;
+        let mut used = 0;
+        while start > 0 {
+            let previous = previous_boundary(&state.query, start);
+            let (scalar, _) = decode_char(&state.query[previous..]);
+            let width = scalar_width(scalar);
+            if used + width > budget { break; }
+            used += width;
+            start = previous;
+        }
+        start
+    }
+
+    fn draw_query(&mut self, state: &Editor, options: &PickerConfig) -> io::Result<()> {
+        let mut index = self.query_start(state, options);
+        let mut column = options.prompt.len();
+        while index < state.query.len() {
+            let (scalar, count) = decode_char(&state.query[index..]);
+            let width = scalar_width(scalar);
+            if column + width >= self.width { break; }
+            self.write_bytes(&state.query[index..index + count])?;
+            index += count;
+            column += width;
+        }
+        Ok(())
     }
 
     fn draw_candidate(

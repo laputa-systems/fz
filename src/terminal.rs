@@ -125,23 +125,28 @@ impl ResizeEvents {
         })
     }
 
-    fn wait_for_input(&self, input: &File, timeout: Option<Duration>) -> io::Result<Wait> {
+    fn wait_for_input(&self, input: &File, termination: &crate::termination::Termination, timeout: Option<Duration>) -> io::Result<Wait> {
         let timeout = timeout.map(|timeout| {
             Timespec::try_from(timeout).expect("the fixed escape timeout fits in a timespec")
         });
+        use std::os::fd::BorrowedFd;
+        // SAFETY: the termination guard owns this descriptor for the entire wait.
+        let wake = unsafe { BorrowedFd::borrow_raw(termination.fd()) };
         let mut descriptors = [
+            PollFd::new(&wake, PollFlags::IN),
             PollFd::new(input, PollFlags::IN),
             PollFd::new(&self.signal_fd, PollFlags::IN),
         ];
         match event::poll(&mut descriptors, timeout.as_ref()) {
             Ok(0) => Ok(Wait::TimedOut),
-            Ok(_) if descriptors[1].revents().contains(PollFlags::IN) => {
+            Ok(_) if descriptors[0].revents().contains(PollFlags::IN) => Ok(Wait::Interrupted),
+            Ok(_) if descriptors[2].revents().contains(PollFlags::IN) => {
                 self.drain_signals()?;
                 // Input may be ready too. Redraw first; it stays readable for
                 // the next iteration, which preserves the resize transition.
                 Ok(Wait::Interrupted)
             }
-            Ok(_) if descriptors[1].revents().is_empty() => Ok(Wait::Ready),
+            Ok(_) if descriptors[2].revents().is_empty() => Ok(Wait::Ready),
             Ok(_) => Err(io::Error::other("signalfd stopped reporting SIGWINCH")),
             // Other signals can still interrupt poll. Redraw and retry.
             Err(Errno::INTR) => Ok(Wait::Interrupted),
@@ -391,20 +396,22 @@ impl ResizeEvents {
         })
     }
 
-    fn wait_for_input(&self, input: &File, timeout: Option<Duration>) -> io::Result<Wait> {
+    fn wait_for_input(&self, input: &File, termination: &crate::termination::Termination, timeout: Option<Duration>) -> io::Result<Wait> {
         // macOS poll reports POLLNVAL for /dev/tty, the default terminal
         // device, so wait with select, which handles it.
         use rustix::event::{FdSetElement, Timespec, fd_set_insert, fd_set_num_elements, select, FdSetIter};
         use std::os::fd::{AsFd, AsRawFd};
         let wake = self.wake_read.as_fd().as_raw_fd();
         let tty = input.as_fd().as_raw_fd();
-        let nfds = wake.max(tty) + 1;
+        let termination_fd = termination.fd();
+        let nfds = wake.max(tty).max(termination_fd) + 1;
         let timeout = timeout.map(|timeout| {
             Timespec::try_from(timeout).expect("the fixed escape timeout fits in a timespec")
         });
-        let mut readfds = vec![FdSetElement::default(); fd_set_num_elements(2, nfds)];
+        let mut readfds = vec![FdSetElement::default(); fd_set_num_elements(3, nfds)];
         fd_set_insert(&mut readfds, wake);
         fd_set_insert(&mut readfds, tty);
+        fd_set_insert(&mut readfds, termination_fd);
         // SAFETY: both descriptors are owned by this terminal and stay open
         // for the call; the set fits every inserted descriptor.
         match unsafe { select(nfds, Some(&mut readfds), None, None, timeout.as_ref()) } {
@@ -413,6 +420,7 @@ impl ResizeEvents {
                 let mut wake_ready = false;
                 let mut tty_ready = false;
                 for fd in FdSetIter::new(&readfds) {
+                    if fd == termination_fd { return Ok(Wait::Interrupted); }
                     if fd == wake {
                         wake_ready = true;
                     } else if fd == tty {
@@ -567,6 +575,7 @@ impl Drop for Foreground { fn drop(&mut self) { let _ = self.restore(); } }
 
 pub struct Terminal {
     resize_events: ResizeEvents,
+    termination: crate::termination::Termination,
     foreground: Option<Foreground>,
     input: File,
     pending: Option<File>,
@@ -597,6 +606,7 @@ impl Terminal {
         }
 
         let foreground = if claim_foreground { Foreground::claim(&input)? } else { None };
+        let termination = crate::termination::Termination::install()?;
         let original = termios::tcgetattr(&input)?;
         let mut raw = original.clone();
         raw.input_modes.remove(InputModes::ICRNL);
@@ -614,6 +624,7 @@ impl Terminal {
 
         let mut terminal = Self {
             resize_events,
+            termination,
             foreground,
             pending,
             input,
@@ -631,6 +642,10 @@ impl Terminal {
         let mut escape_deadline: Option<Instant> = None;
         let mut draw_needed = true;
         loop {
+            if let Some(signal) = self.termination.pending() {
+                self.restore()?;
+                return Err(io::Error::new(io::ErrorKind::Interrupted, crate::termination::Interrupted(signal)));
+            }
             let (width, height) = self.dimensions();
             picker.resize(width, height)?;
             if draw_needed { picker.render(&mut self.output, width)?; }
@@ -663,6 +678,25 @@ impl Terminal {
         }
     }
 
+    pub(crate) fn wait_candidate_input(&self, source: &File) -> io::Result<()> {
+        use std::os::fd::BorrowedFd;
+        use rustix::event::{PollFd, PollFlags};
+        loop {
+            if let Some(signal) = self.termination.pending() {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, crate::termination::Interrupted(signal)));
+            }
+            // SAFETY: the termination guard owns this descriptor for the wait.
+            let wake = unsafe { BorrowedFd::borrow_raw(self.termination.fd()) };
+            let mut fds = [PollFd::new(source, PollFlags::IN), PollFd::new(&wake, PollFlags::IN)];
+            match rustix::event::poll(&mut fds, None) {
+                Ok(_) if !fds[1].revents().is_empty() => continue,
+                Ok(_) => return Ok(()),
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+
     fn dimensions(&self) -> (usize, usize) {
         let Ok(size) = termios::tcgetwinsize(self.output.get_ref()) else {
             return (80, 25);
@@ -675,7 +709,7 @@ impl Terminal {
 
     fn wait_for_input(&self, timeout: Option<Duration>) -> io::Result<Wait> {
         if self.pending.is_some() { return Ok(Wait::Ready); }
-        self.resize_events.wait_for_input(&self.input, timeout)
+        self.resize_events.wait_for_input(&self.input, &self.termination, timeout)
     }
 
     fn read_byte(&mut self) -> io::Result<Option<u8>> {
@@ -718,7 +752,8 @@ impl Terminal {
         };
         let resize_result = self.resize_events.restore();
         let foreground_result = self.foreground.as_mut().map_or(Ok(()), Foreground::restore);
-        termios_result.and(resize_result).and(foreground_result)
+        let termination_result = self.termination.restore();
+        termios_result.and(resize_result).and(foreground_result).and(termination_result)
     }
 
 }

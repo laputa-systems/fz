@@ -755,9 +755,23 @@ class Acceptance(unittest.TestCase):
         session.wait_for_lines([">"])
         self.assert_exit(session, b"\x03", 1, b"")
 
+    def test_termination_restores_terminal_and_reports_signal_death(self):
+        for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT):
+            session = self.session(b"alpha\nbeta\n")
+            session.wait_for_lines([">", "alpha", "beta"])
+            session.proc.send_signal(sig)
+            session._wait(3.0)
+            self.assertEqual(session.proc.returncode, -sig)
+            self.assertEqual(session.proc.stdout.read(), b"")
+            self.assertTrue(session.restored())
+
     def test_slow_stdin_and_large_input(self):
         session = self.session(None)
-        time.sleep(0.08)
+        deadline = time.monotonic() + 2
+        while termios.tcgetattr(session.master)[3] & termios.ICANON:
+            if time.monotonic() >= deadline:
+                self.fail("selector never entered raw input mode")
+            time.sleep(0.005)
         session.send("b\r")
         session.write_stdin(b"aa\nbc\nbd\n")
         session.close_stdin()
