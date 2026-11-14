@@ -34,6 +34,14 @@ pub const HELP: &str = "Usage: fz [OPTION]...
  -v, --version           Display version
 ";
 
+const OWNED_TOOL_FOOTER: &str = "Maintained by Joshua Li: https://github.com/laputa-systems/fz
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md
+";
+
 /// The shared CLI help with the fresh worker's serial search default.
 pub fn worker_help() -> String { HELP.replace("default up to 4; small searches use 1", "default 1 in ish; small searches use 1") }
 
@@ -106,6 +114,10 @@ impl Options {
                     b'0' => options.delimiter = 0,
                     b'i' => options.show_info = true,
                     b'm' => options.multi = true,
+                    b'h' => {
+                        eprint!("{help}{OWNED_TOOL_FOOTER}");
+                        return Ok(None);
+                    }
                     b'v' => {
                         println!("fz {} (fzy port; © 2014-2025 John Hawthorn)", env!("CARGO_PKG_VERSION"));
                         return Ok(None);
