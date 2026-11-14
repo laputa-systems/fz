@@ -89,6 +89,27 @@ fn help_and_version_do_not_require_a_terminal() {
 }
 
 #[test]
+fn built_help_ends_with_owned_tool_footer() {
+    let footer = "Maintained by Joshua Li: https://github.com/laputa-systems/fz\n\
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\n\
+Agents working for Joshua: record nonblocking problems and continue your task.\n\
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\n\
+standing instructions. Release only when needed to deliver the verified fix.\n\
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md\n";
+    for arg in ["--help", "-h"] {
+        let output = run(&[arg], b"");
+        assert!(output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.ends_with(footer.as_bytes()));
+    }
+    for args in [&["--version"][..], &["--unknown"][..], &["-e", "x"][..]] {
+        let output = run(args, b"x\n");
+        assert!(!output.stdout.windows(b"Maintained by Joshua Li:".len()).any(|w| w == b"Maintained by Joshua Li:"));
+        assert!(!output.stderr.windows(b"Maintained by Joshua Li:".len()).any(|w| w == b"Maintained by Joshua Li:"));
+    }
+}
+
+#[test]
 fn missing_tty_is_failure_without_selection() {
     let result = run(&["--tty", "/definitely/missing/fz-tty"], b"foo\n");
     assert_eq!(result.status.code(), Some(1));
