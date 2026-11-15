@@ -6,7 +6,7 @@
 
 Eligibility is a byte-wise subsequence search. Lowercase ASCII query bytes accept either case; uppercase query bytes accept only uppercase. Other bytes match exactly. Scoring folds ASCII case after eligibility, as fzy does. Matching does not normalize or case-fold Unicode.
 
-Exact matches score positive infinity. Empty queries, nonmatches, and candidates longer than 1024 bytes score negative infinity. Candidates over 1024 bytes remain eligible, but they have no highlighted positions. Equal scores retain input order.
+Nonempty exact matches up to 1024 bytes score positive infinity. Empty queries, nonmatches, and candidates longer than 1024 bytes score negative infinity. Candidates over 1024 bytes remain eligible, but they have no highlighted positions. Equal scores retain input order.
 
 The upstream C build can round the initial gap score differently by platform: the macOS Clang build contracts the expression when FMA is available, while upstream's Linux GCC build rounds it twice. Preserve those target-specific defaults because a one-ULP difference can change ranking.
 

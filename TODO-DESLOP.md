@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 7
+Next: 8
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -10,14 +10,6 @@ Ground base: `1a42f7c3bebecdd63331524366492252ccf23870`; macOS arm64, fresh targ
 ## Tickets
 
 
-### DSLP-2 · P2 · Diagnose: ultrareview into this backlog
-
-- **Area:** deslop · diagnose
-- **Where:** whole repository
-- **Problem:** No review has ranked this repository's risks for the deslop pass.
-- **Recommendation:** Run the deslop Diagnose step. Accept: the diff touches only docs, comments, and this file, and every finding names its Fix with.
-- **Fix with:** deslop
-- **Effort:** S
 
 ### DSLP-3 · P2 · Types: strict profile and typing findings
 
@@ -55,4 +47,14 @@ Ground base: `1a42f7c3bebecdd63331524366492252ccf23870`; macOS arm64, fresh targ
 - **Recommendation:** Provision a pinned fzy in CI (or fail rather than skip when CI=true), and confirm in the job log that both cases ran.
 - **Fix with:** test-audit
 - **Effort:** S
+
+
+### DSLP-7 · P3 · Cover the foreground worker terminal handoff
+
+- **Area:** Tests · embedding
+- **Where:** src/cli.rs:214, src/terminal.rs:545, src/terminal.rs:590, tests/acceptance.py:758
+- **Problem:** Test-gap finding: run_in_foreground is an exported embedding entry point, but no test calls it. Its foreground process-group handoff, restoration and pending-input path are distinct from the standalone CLI exercised by acceptance tests; regressions there can break ish interactive substitutions without those tests noticing. Critical mutation modules: src/cli.rs and src/terminal.rs.
+- **Recommendation:** Add a real PTY worker-boundary scenario that calls run_in_foreground, checks pending input and selection, and verifies the original foreground group and terminal state after acceptance and cancellation. Exercise worker_help's serial default at that boundary.
+- **Fix with:** test-audit
+- **Effort:** M
 
