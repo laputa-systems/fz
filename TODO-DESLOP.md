@@ -1,22 +1,14 @@
 Prefix: DSLP
-Next: 6
+Next: 7
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
 ## Report
 
-Not started.
+Ground base: `1a42f7c3bebecdd63331524366492252ccf23870`; macOS arm64, fresh target: `make test` 15.65s cold, 6.99s warm; `make lint` 2.34s, all exit 0 under `cpu-guard --cores 6`. The acceptance harness ran 24 cases, skipping two differential oracle cases because fzy was absent; PR CI does not provision an oracle, and `benches/test_perf.py` is outside `make test`. Python comprises test harnesses and benchmark tooling, not shipped runtime. No vendored trees in this repository; ish vendors fz with its own UPSTREAM. Performance workloads: `benches/bench.rs` and `benches/perf.py`; see `benches/README.md`. CI changed from `cargo test` to `make test`. No runtime changes; consumer and performance gates unaffected.
 
 ## Tickets
 
-### DSLP-1 · P2 · Ground: baseline, boundaries, and CI test entry point
-
-- **Area:** deslop · ground
-- **Where:** AGENTS.md, Makefile, .github/workflows/
-- **Problem:** Base 8f080b2; code lines Rust 3.3k, Python 1.8k (fleet/loc/v1, vendored included); timings not yet measured. CI does not run make test: runs tests directly on pull requests; run make test or make test-ci instead so CI and local verification share one entry point. Open fleet lint findings: linux-musl-toolchain 3, gha-macos 2, audit-upgrades 1, binary-release-static 1, github-protection 1, laputa-rustix 1, make-clean-target 1. Consumers in the fleet: ish; their tests are the consumer check for API changes. Perf gate: decide in Ground whether a user-visible hot path needs a workload.
-- **Recommendation:** Run the deslop Ground step. Accept: CI runs make test and is green, and AGENTS.md has a Verification section.
-- **Fix with:** deslop
-- **Effort:** S
 
 ### DSLP-2 · P2 · Diagnose: ultrareview into this backlog
 
@@ -53,4 +45,14 @@ Not started.
 - **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
 - **Fix with:** deslop
 - **Effort:** M
+
+
+### DSLP-6 · P3 · PR CI skips the fzy differential acceptance cases
+
+- **Area:** Tests · CI
+- **Where:** tests/acceptance.py:828, .github/workflows/ci.yml
+- **Problem:** The acceptance harness skips its two differential cases when fzy is not installed. PR CI does not install fzy, so those cases never run there; a green CI says nothing about parity with fzy.
+- **Recommendation:** Provision a pinned fzy in CI (or fail rather than skip when CI=true), and confirm in the job log that both cases ran.
+- **Fix with:** test-audit
+- **Effort:** S
 

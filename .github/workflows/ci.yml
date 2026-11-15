@@ -40,4 +40,4 @@ jobs:
         with:
           persist-credentials: false
       - name: Test
-        run: cargo test
+        run: make test
