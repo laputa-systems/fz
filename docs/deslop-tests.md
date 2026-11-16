@@ -154,7 +154,22 @@ with `vendor/fz/UPSTREAM` resolving the merged candidate `17d0e665`.
 PTY scenarios; existing ignored tests remain ignored. The importer retains
 explicit upstream test targets without copying their files. Removing only
 that unavailable manifest target in the fixture allows Cargo to load the
-exact candidate library sources; the importer defect needs its own fix.
+exact candidate library sources. The importer defect is now repaired by
+[ish PR #30](https://github.com/joshuarli/ish/pull/30), merged as
+`3930ca270adf3a9aea46c4a7b1af092b74e2ca8a`: library-only imports remove
+explicit test targets whose files they do not copy. Its disposable Cargo
+regression fails before the repair and passes afterward.
+
+The repaired importer also loads final fz `60fc1e95` without a manifest
+adjustment. All four ish worker scenarios and workspace Clippy pass with
+that imported source. A fresh full consumer run passed 320 library tests
+but timed out in the unchanged input framing test at `src/input.rs:1107`;
+[ish issue #29](https://github.com/joshuarli/ish/issues/29) records that
+failure and its unproven cause. It is not a passing full run. The earlier
+full consumer proof at `17d0e665` remains valid for shipped Rust, which is
+identical at `60fc1e95`; later fz changes remove only an unread benchmark
+field and rename unused Python callback parameters.
+
 An initial busy-host gate deferred runtime measurement. After the host gate
 passed, five interleaved baseline/candidate pairs ran the declared terminal
 workload on macOS arm64, default features, identical lockfiles and release
