@@ -83,8 +83,8 @@ fn multi_reports_terminal_errors_separately_from_cancellation() {
 fn help_and_version_do_not_require_a_terminal() {
     let help = run(&["--help"], b"");
     assert!(help.status.success());
-    assert!(help.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&help.stderr).contains("Usage: fz"));
+    assert!(help.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&help.stdout).contains("Usage: fz"));
     let version = run(&["--version"], b"");
     assert!(version.status.success());
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("fz "));
@@ -101,14 +101,44 @@ Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/inst
     for arg in ["--help", "-h"] {
         let output = run(&[arg], b"");
         assert!(output.status.success());
-        assert!(output.stdout.is_empty());
-        assert!(output.stderr.ends_with(footer.as_bytes()));
+        assert!(output.stderr.is_empty());
+        assert!(output.stdout.ends_with(footer.as_bytes()));
+        assert_eq!(String::from_utf8_lossy(&output.stdout).matches("Maintained by Joshua Li:").count(), 1);
     }
     for args in [&["--version"][..], &["--unknown"][..], &["-e", "x"][..]] {
         let output = run(args, b"x\n");
         assert!(!output.stdout.windows(b"Maintained by Joshua Li:".len()).any(|w| w == b"Maintained by Joshua Li:"));
         assert!(!output.stderr.windows(b"Maintained by Joshua Li:".len()).any(|w| w == b"Maintained by Joshua Li:"));
     }
+}
+
+#[test]
+fn built_help_is_a_complete_reference_and_examples_parse() {
+    let output = run(&["-h"], b"");
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let help = std::str::from_utf8(&output.stdout).unwrap();
+    let (reference, rest) = help.split_once("\nExamples:\n").unwrap();
+    assert!(reference.starts_with("Usage: fz [OPTION]...\n\nOptions:\n"));
+    for option in ["-l, --lines=LINES", "-p, --prompt=PROMPT", "-q, --query=QUERY",
+                   "-e, --show-matches=QUERY", "-t, --tty=TTY", "-s, --show-scores",
+                   "-0, --read-null", "-j, --workers=NUM", "-i, --show-info",
+                   "-m, --multi", "-h, --help", "-v, --version"] {
+        assert_eq!(reference.matches(option).count(), 1, "{option}");
+    }
+    let examples = rest.split_once("Maintained by Joshua Li:").unwrap().0;
+    let mut count = 0;
+    for example in examples.lines().filter(|line| !line.trim().is_empty()) {
+        let mut words = example.split_whitespace();
+        assert_eq!(words.next(), Some("fz"));
+        let args: Vec<_> = words.collect();
+        let result = run(&args, b"alpha\nbeta\n");
+        assert_eq!(result.status.code(), Some(0), "{example}");
+        assert_eq!(result.stdout, b"alpha\n", "{example}");
+        assert!(result.stderr.is_empty(), "{example}");
+        count += 1;
+    }
+    assert_eq!(count, 1);
 }
 
 #[test]

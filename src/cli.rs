@@ -19,20 +19,39 @@ struct Options {
     workers: usize,
 }
 
-pub const HELP: &str = "Usage: fz [OPTION]...
- -l, --lines=LINES        Results to show (default 10; minimum 3; or max)
- -p, --prompt=PROMPT      Input prompt (default '> ')
- -q, --query=QUERY        Initial search string
- -e, --show-matches=QUERY Output sorted matches without a terminal
- -t, --tty=TTY            Terminal device (default /dev/tty)
- -s, --show-scores        Show match scores
- -0, --read-null          Read NUL-delimited candidates
- -j, --workers=NUM        Maximum workers (default up to 4; small searches use 1)
- -i, --show-info          Show match count
- -m, --multi               Mark multiple candidates (Down, Space, Enter)
- -h, --help              Display this help
- -v, --version           Display version
-";
+struct OptionSpec {
+    short: u8,
+    long: &'static [u8],
+    takes_value: bool,
+}
+
+macro_rules! cli_options {
+    ($(($short:literal, $long:literal, $value:literal, $takes_value:literal, $description:literal)),+ $(,)?) => {
+        const OPTION_SPECS: &[OptionSpec] = &[
+            $(OptionSpec { short: $short.as_bytes()[0], long: $long.as_bytes(), takes_value: $takes_value }),+
+        ];
+        pub const HELP: &str = concat!(
+            "Usage: fz [OPTION]...\n\nOptions:\n",
+            $("  -", $short, ", --", $long, $value, "  ", $description, "\n",)+
+            "\nExamples:\n  fz --show-matches=alpha\n"
+        );
+    };
+}
+
+cli_options!(
+    ("l", "lines", "=LINES", true, "Results to show (default 10; minimum 3; or max)"),
+    ("p", "prompt", "=PROMPT", true, "Input prompt (default '> ')"),
+    ("q", "query", "=QUERY", true, "Initial search string (default empty)"),
+    ("e", "show-matches", "=QUERY", true, "Output sorted matches without a terminal"),
+    ("t", "tty", "=TTY", true, "Terminal device (default /dev/tty)"),
+    ("s", "show-scores", "", false, "Show match scores"),
+    ("0", "read-null", "", false, "Read NUL-delimited candidates"),
+    ("j", "workers", "=NUM", true, "Maximum workers (default up to 4; small searches use 1; 0 uses available CPUs)"),
+    ("i", "show-info", "", false, "Show match count"),
+    ("m", "multi", "", false, "Mark multiple candidates (Down, Space, Enter); incompatible with --show-matches"),
+    ("h", "help", "", false, "Display this help"),
+    ("v", "version", "", false, "Display version"),
+);
 
 const OWNED_TOOL_FOOTER: &str = "Maintained by Joshua Li: https://github.com/laputa-systems/fz
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
@@ -63,19 +82,14 @@ impl Options {
             let long_key;
             let (keys, attached) = if let Some(long) = arg.strip_prefix(b"--") {
                 let end = long.iter().position(|&ch| ch == b'=').unwrap_or(long.len());
-                long_key = match &long[..end] {
-                    b"lines" => b'l', b"prompt" => b'p', b"query" => b'q',
-                    b"show-matches" => b'e', b"tty" => b't', b"show-scores" => b's',
-                    b"read-null" => b'0', b"workers" => b'j', b"show-info" => b'i',
-                    b"multi" => b'm',
-                    b"help" => b'h', b"version" => b'v', _ => b'?',
-                };
+                long_key = OPTION_SPECS.iter().find(|spec| spec.long == &long[..end])
+                    .map_or(b'?', |spec| spec.short);
                 (&[long_key][..], (end < long.len()).then(|| &long[end + 1..]))
             } else {
                 (&arg[1..], None)
             };
             for (index, &key) in keys.iter().enumerate() {
-                if b"lpqetj".contains(&key) {
+                if OPTION_SPECS.iter().any(|spec| spec.short == key && spec.takes_value) {
                     let value: Cow<'_, [u8]> = if let Some(value) = attached {
                         Cow::Borrowed(value)
                     } else if index + 1 < keys.len() {
@@ -115,7 +129,8 @@ impl Options {
                     b'i' => options.show_info = true,
                     b'm' => options.multi = true,
                     b'h' => {
-                        eprint!("{help}{OWNED_TOOL_FOOTER}");
+                        print!("{help}{OWNED_TOOL_FOOTER}");
+                        let _ = io::stdout().flush();
                         return Ok(None);
                     }
                     b'v' => {
@@ -234,6 +249,21 @@ fn dispatch(args: impl Iterator<Item = Vec<u8>>, claim_foreground: bool, input: 
         Err(error) => {
             eprintln!("fz: {error}\n{help}");
             1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OPTION_SPECS;
+
+    #[test]
+    fn option_spellings_are_unique() {
+        for (index, option) in OPTION_SPECS.iter().enumerate() {
+            for other in &OPTION_SPECS[index + 1..] {
+                assert_ne!(option.short, other.short);
+                assert_ne!(option.long, other.long);
+            }
         }
     }
 }
