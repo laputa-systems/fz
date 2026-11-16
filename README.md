@@ -42,6 +42,8 @@ This prints matching candidates in score order and exits with status 0, includin
 
 ## Options
 
+`fz -h` and `fz --help` print the complete option reference and an example to stdout without opening a terminal. Running `fz` without options starts the selector.
+
 | Option | Effect |
 | --- | --- |
 | `-l`, `--lines=LINES` | Number of result rows (default 10; minimum 3; or `max`) |
@@ -51,7 +53,7 @@ This prints matching candidates in score order and exits with status 0, includin
 | `-t`, `--tty=TTY` | Terminal device (default `/dev/tty`) |
 | `-s`, `--show-scores` | Show match scores |
 | `-0`, `--read-null` | Read NUL-separated candidates |
-| `-j`, `--workers=NUM` | Maximum workers (default up to four; small searches use one) |
+| `-j`, `--workers=NUM` | Maximum workers (default up to four; small searches use one; zero uses available CPUs) |
 | `-i`, `--show-info` | Show the match count |
 | `-m`, `--multi` | Mark multiple results with Space, then accept with Enter |
 | `-h`, `--help` | Show help |

@@ -87,8 +87,8 @@ with tempfile.NamedTemporaryFile() as control:
         os.environ.pop("FZ_WORKER_SIGNAL", None)
 code, help_stdout, help_text = run(["--help"])
 assert code == 0
-assert help_stdout == b""
-assert b"default 1 in ish; small searches use 1" in help_text, help_text
+assert help_text == b""
+assert b"default 1 in ish; small searches use 1" in help_stdout, help_stdout
 if sys.platform == "linux":
     root = Path(__file__).resolve().parents[1]
     scratch = root / ".work/tmp"
