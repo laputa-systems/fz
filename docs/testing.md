@@ -36,5 +36,5 @@ Python 3.11 or newer. The gate selects changed production lines together with
 the configured critical scope when tests, fixtures or build configuration change.
 It rejects incomplete results, unresolved timeouts and infrastructure markers
 from the PTY harness. The critical scope is scoring, candidate storage, ranking
-and CLI parsing. The lane remains under qualification until its negative
-controls and survivor dispositions pass.
+and CLI parsing. The core lane is qualified; see [the evidence](deslop-tests.md). Terminal
+and signal mutation qualification remains in DSLP-4.
