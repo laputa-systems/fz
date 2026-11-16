@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 8
+Next: 10
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -44,6 +44,26 @@ No contracts changed; witnesses not applicable. macOS lint and test passed; two 
 - **Problem:** No dead-code scan has run.
 - **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
 - **Fix with:** deslop
+- **Effort:** M
+
+
+### DSLP-8 · P2 · Mutation timeouts leave selector processes running
+
+- **Area:** Tests · process lifetime
+- **Where:** tests/acceptance.py:157-160, tests/acceptance.rs:31-45
+- **Problem:** During the DSLP-4 cargo-mutants run, 30-second timeouts left mutated fz processes reparented to PID 1 and consuming CPU. For example, the src/lib.rs and src/cli.rs run with --timeout 30 --jobs 4 produced orphaned processes under .work/tmp/cargo-mutants-tests-*/target/debug/fz; the PTY harness starts each selector in a new session. This contaminates mutation timing and can compromise later checks.
+- **Recommendation:** Make the acceptance process tree terminate and be reaped when the mutation runner times out, including selectors in separate sessions; demonstrate that a timed-out mutant leaves no live descendants before repeating the mutation proof.
+- **Fix with:** test-audit
+- **Effort:** M
+
+
+### DSLP-9 · P2 · PTY name lookup causes false mutation catches on macOS
+
+- **Area:** Tests · PTY isolation
+- **Where:** tests/acceptance.py:221, .work/mutants-final-a1/mutants.out/log/src__score.rs_line_102_col_35.log
+- **Problem:** During the four-job scoring mutation run, two acceptance cases failed at os.ttyname(self.slave) with OSError errno 34, unrelated to the mutations. One mutation was in a Linux-only branch, so its reported caught result was false on macOS. This intermittent failure can make mutation results unreliable and fail ordinary tests under PTY churn; the cause of the device-name lookup failure is not yet established. The harness now gives each selector its own controlling terminal and uses /dev/tty, eliminating os.ttyname. A regression with ttyname forced to raise errno 34 failed before and passes after. Injected PTY allocation errors exit 86 with FZ_HARNESS_ERROR. The kernel lookup failure did not reproduce in 20,000 allocations. The mutation gate must still reject infrastructure markers before this ticket can close.
+- **Recommendation:** Reproduce the PTY lookup failure under the supported macOS test workload, establish its cause, and make the harness deterministic without retrying away errors; verify that unrelated PTY setup failures cannot count as mutation catches.
+- **Fix with:** root-cause
 - **Effort:** M
 
 

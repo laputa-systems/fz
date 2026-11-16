@@ -33,6 +33,7 @@ import termios
 import threading
 import time
 import unittest
+from unittest.mock import patch
 import unicodedata
 from pathlib import Path
 
@@ -154,10 +155,15 @@ class PtyFz:
         # and remains queryable, so use it for the restoration assertion.
         self.original_termios = termios.tcgetattr(self.master)
         self.screen = Screen(rows, cols)
+        def prepare_terminal():
+            fcntl.ioctl(self.slave, termios.TIOCSCTTY, 0)
+            if ignore_hangup:
+                ignore_sighup()
         self.proc = subprocess.Popen(
-            [str(binary or BIN), *args, "--tty", os.ttyname(self.slave)],
+            [str(binary or BIN), *args, "--tty", "/dev/tty"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True, preexec_fn=ignore_sighup if ignore_hangup else None,
+            pass_fds=(self.slave,),
+            start_new_session=True, preexec_fn=prepare_terminal,
         )
         if candidates is not None:
             self.write_stdin(candidates)
@@ -425,6 +431,12 @@ def deterministic_fixtures():
 
 
 class Acceptance(unittest.TestCase):
+    def test_selection_does_not_require_pty_name_lookup(self):
+        with patch.object(os, "ttyname", side_effect=OSError(errno.ERANGE, "Result too large")):
+            session = self.session(b"alpha\nbeta\n")
+            session.wait_for_lines([">", "alpha", "beta"])
+            self.assert_exit(session, b"\r", 0, b"alpha\n")
+
     def test_batched_query_navigation_and_completion_use_fresh_results(self):
         session = self.session(b"foo\nbar\nbaz\n")
         session.wait_for_lines([">", "foo", "bar", "baz"])
@@ -947,4 +959,8 @@ class MultiSelectionTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(argv=[sys.argv[0]], verbosity=2)
+    result = unittest.main(argv=[sys.argv[0]], verbosity=2, exit=False).result
+    if result.errors:
+        print("FZ_HARNESS_ERROR: acceptance setup or driver failed", file=sys.stderr)
+        sys.exit(86)
+    sys.exit(not result.wasSuccessful())
