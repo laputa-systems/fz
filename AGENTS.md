@@ -25,11 +25,12 @@
 
 ## Verification
 
-- `cpu-guard --cores 6 -- make test`: cold 15.65s, warm 6.99s; Python 3 required.
+- `cpu-guard --cores 6 -- make test`: Ground cold/warm 15.65s/6.99s; core Tests slice warm median 12.17s with `RUST_TEST_THREADS=2` and the pinned fzy oracle (five pairs; baseline 10.95s). Python 3 required.
 - `cpu-guard --cores 6 -- make lint`: 2.34s (macOS arm64, warm target).
 - CLI flags, byte input, filter output, errors and exit codes: `tests/cli.rs`; interactive keys, terminal output, cancellation and multi-select: `tests/acceptance.py`, `tests/default_tty.rs`.
-- Differential CLI and interactive oracle cases in `tests/acceptance.py` skip without fzy; PR CI does not provision it; `benches/test_perf.py` is not in `make test`.
-- Public matcher, scoring, rank and Choices API: `tests/core.rs`; Candidates: `tests/candidates.rs`; Picker: `tests/picker.rs`. CLI `run` is exercised by `tests/cli.rs`; `run_in_foreground` and `worker_help`: none.
+- Differential CLI and interactive oracle cases in `tests/acceptance.py` skip locally without fzy; PR CI builds the pinned oracle; `benches/test_perf.py` is not in `make test`.
+- Public matcher, scoring, rank and Choices API: `tests/core.rs`; Candidates: `tests/candidates.rs`; Picker: `tests/picker.rs`. CLI `run`: `tests/cli.rs`; foreground handoff, pending input and worker help: `tests/foreground.rs` and `tests/foreground_probe.py`.
+- Fast Rust API tiers cover scorer/candidates/ranking; real CLI and PTY process tiers cover flags, errors, foreground ownership and cleanup. PTY acceptance dominates elapsed time; see `docs/deslop-tests.md`.
 - Persistent file formats, wire formats, endpoints: none.
 - Performance: `benches/bench.rs` and `benches/perf.py` cover matcher, filtering and terminal redraw; see `benches/README.md` for workloads and prerequisites.
 - Library consumer: ish vendors fz; run ish tests against the candidate for affected API changes.

@@ -23,17 +23,19 @@ Types (DSLP-3): Rust escape-hatch matching lines 90 → 90; Python 0 → 0. Cand
 
 No contracts changed; witnesses not applicable. macOS lint and test passed; two fzy oracle cases skipped. Linux-specific lint paths were not measured on this host.
 
+Core Tests slice: [qualification report](docs/deslop-tests.md). The 27 baseline survivors are caught; line/branch coverage is 89.63%/75.92% on macOS. Five interleaved warm pairs remain within the test-cost budget. Linux and macOS CI provision the pinned fzy oracle. Foreground worker selection/restoration and Linux input/resource boundaries have real process probes. The remaining Tests component is terminal/signal mutation qualification in DSLP-4.
+
 ## Tickets
 
 
 
 
-### DSLP-4 · P2 · Tests: coverage, boundary gaps, mutation
+### DSLP-4 · P2 · Tests: qualify terminal lifecycle mutation coverage
 
 - **Area:** deslop · tests
-- **Where:** test suites and CI
-- **Problem:** Coverage and mutation results are unmeasured; no deslop mutation lane exists.
-- **Recommendation:** Run the deslop Tests step. Accept: no undispositioned survivor in critical code, the test cost budget holds, and the lane is green where the tools are mirrored.
+- **Where:** src/terminal.rs; src/termination.rs; tests/foreground_probe.py; .cargo/mutants-gate.toml
+- **Problem:** The core Tests slice is qualified: 355 selected mutants, 348 caught, 7 unviable, zero missed or timed out; before/after coverage and test-cost checks pass. Terminal ownership, poll/read error paths and signal cleanup remain outside the current configured scope. They contain 160 terminal and 31 termination mutants and must receive their own survivor dispositions before the Tests step is complete. See docs/deslop-tests.md.
+- **Recommendation:** Extend the bounded critical scope to terminal ownership and signal lifecycle, run its before/after Scenario evidence, disposition every survivor and unrun decision region, and qualify the combined lane within its budget (shard if measured cost requires it). Accept: make test/lint/mutants-selftest pass, handoff/cleanup faults are caught, and no undispositioned survivor remains in that scope. Production changes also require ish consumer and performance gates.
 - **Fix with:** deslop
 - **Effort:** M
 
@@ -45,36 +47,3 @@ No contracts changed; witnesses not applicable. macOS lint and test passed; two 
 - **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
 - **Fix with:** deslop
 - **Effort:** M
-
-
-
-
-### DSLP-9 · P2 · PTY name lookup causes false mutation catches on macOS
-
-- **Area:** Tests · PTY isolation
-- **Where:** tests/acceptance.py:221, .work/mutants-final-a1/mutants.out/log/src__score.rs_line_102_col_35.log
-- **Problem:** During the four-job scoring mutation run, two acceptance cases failed at os.ttyname(self.slave) with OSError errno 34, unrelated to the mutations. One mutation was in a Linux-only branch, so its reported caught result was false on macOS. This intermittent failure can make mutation results unreliable and fail ordinary tests under PTY churn; the cause of the device-name lookup failure is not yet established. The harness now gives each selector its own controlling terminal and uses /dev/tty, eliminating os.ttyname. A regression with ttyname forced to raise errno 34 failed before and passes after. Injected PTY allocation errors exit 86 with FZ_HARNESS_ERROR. The kernel lookup failure did not reproduce in 20,000 allocations. The mutation gate must still reject infrastructure markers before this ticket can close.
-- **Recommendation:** Reproduce the PTY lookup failure under the supported macOS test workload, establish its cause, and make the harness deterministic without retrying away errors; verify that unrelated PTY setup failures cannot count as mutation catches.
-- **Fix with:** root-cause
-- **Effort:** M
-
-
-### DSLP-6 · P3 · PR CI skips the fzy differential acceptance cases
-
-- **Area:** Tests · CI
-- **Where:** tests/acceptance.py:828, .github/workflows/ci.yml
-- **Problem:** The acceptance harness skips its two differential cases when fzy is not installed. PR CI does not install fzy, so those cases never run there; a green CI says nothing about parity with fzy.
-- **Recommendation:** Provision a pinned fzy in CI (or fail rather than skip when CI=true), and confirm in the job log that both cases ran.
-- **Fix with:** test-audit
-- **Effort:** S
-
-
-### DSLP-7 · P3 · Cover the foreground worker terminal handoff
-
-- **Area:** Tests · embedding
-- **Where:** src/cli.rs:214, src/terminal.rs:545, src/terminal.rs:590, tests/acceptance.py:758
-- **Problem:** Test-gap finding: run_in_foreground is an exported embedding entry point, but no test calls it. Its foreground process-group handoff, restoration and pending-input path are distinct from the standalone CLI exercised by acceptance tests; regressions there can break ish interactive substitutions without those tests noticing. Critical mutation modules: src/cli.rs and src/terminal.rs.
-- **Recommendation:** Add a real PTY worker-boundary scenario that calls run_in_foreground, checks pending input and selection, and verifies the original foreground group and terminal state after acceptance and cancellation. Exercise worker_help's serial default at that boundary.
-- **Fix with:** test-audit
-- **Effort:** M
-

@@ -1,0 +1,44 @@
+exclude_re = [
+    # The work threshold selects serial versus parallel scoring of the same disjoint ranges; worker limits and identical order/scores are checked separately.
+    '^src/lib\.rs:100:66: replace \&\& with \|\| in Choices::search$',
+    # A single worker enters the parallel path with one full-size caller chunk and zero child threads; its result is identical.
+    '^src/lib\.rs:100:29: replace > with >= in Choices::search$',
+    # Every public row/index read calls rank_through itself. Eager rank_all changes only when sorting happens; the ranked prefix is private.
+    '^src/lib\.rs:128:9: replace Choices::rank_all with \(\)$',
+    # Both branches establish the requested sorted prefix. Full sort versus partial selection changes only sorting work.
+    '^src/lib\.rs:139:19: replace >= with < in Choices::rank_through$',
+    # prefix / 1 selects the next pivot instead of prefix - 1; either leaves the first prefix entries correct before sorting them.
+    '^src/lib\.rs:144:48: replace \- with / in Choices::rank_through$',
+    # Offsets expose neither capacity nor allocations. Removing shrink_to_fit changes retained spare storage only; resource workloads remain in benches/.
+    '^src/lib\.rs:240:9: replace CandidateOffsets::shrink_to_fit with \(\)$',
+    # The initial capacity hint changes by at most one element; Vec grows to hold the same offsets and exposes no capacity.
+    '^src/lib\.rs:246:41: replace \+ with \* in Candidates::from_input$',
+    # Remainder versus quotient changes an initial Vec capacity hint, not its contents; Vec grows as needed. The oversized multiplication mutant stays enabled and is caught by the process memory bound.
+    '^src/lib\.rs:246:36: replace / with % in Candidates::from_input$',
+    # At start == bytes.len(), the search is empty, no offset is pushed, and the existing end == len break runs before increment.
+    '^src/lib\.rs:253:21: replace < with <= in Candidates::from_input$',
+    # from_input skips empty records and the sole sentinel is not a record. A delimiter-backed record starts with a nondelimiter, so trimming cannot reach end == start.
+    '^src/lib\.rs:287:23: replace > with >= in Candidates::get$',
+    # Both buffer lengths are positive. The read loop appends every returned chunk until EOF; the change affects chunking, not bytes or error propagation.
+    '^src/cli\.rs:149:35: replace \* with \+ in read_candidates$',
+    # At j == 0 the diagonal states are negative infinity. Entering the match branch still yields negative infinity and the same best state.
+    '^src/score\.rs:190:61: replace > with >= in score_rows$',
+    # At j == 0 diagonal_ending is negative infinity; only impossible cells gain the flag, and an impossible alignment is rejected before backtracking.
+    '^src/score\.rs:200:46: replace > with >= in score_rows$',
+    # The combined ENDING/BEST bits (1 and 2) and CONSECUTIVE_PATH bit (4) are disjoint, so OR equals XOR.
+    '^src/score\.rs:243:117: replace \| with \^ in match_positions$',
+    # ENDING bit 1 and BEST bit 2 are disjoint, so OR equals XOR.
+    '^src/score\.rs:243:73: replace \| with \^ in match_positions$',
+    # ENDING is 1, so multiplying or dividing a 0/1 boolean value gives the same flag.
+    '^src/score\.rs:243:63: replace \* with / in match_positions$',
+    # A required consecutive predecessor necessarily has finite ENDING; a finite BEST cell equal to ENDING also has ENDING. Other cells cannot satisfy required || BEST on a valid finite backtrace.
+    '^src/score\.rs:256:22: replace \& with \| in match_positions$',
+    # Only the final i == 0 iteration changes required, which is never read again.
+    '^src/score\.rs:257:30: replace > with >= in match_positions$',
+    # A valid alignment at query row i has column >= i. When i > 0, column is already positive; when i == 0 the first conjunct is false.
+    '^src/score\.rs:257:44: replace > with >= in match_positions$',
+    # The fast path becomes stricter, but find_either searches the unchanged haystack for the same two bytes when it declines. Both branches consume exactly the same matching byte.
+    '^src/score\.rs:48:31: replace \|\| with \&\& in has_match$',
+    # The partial branch requires target < ceil(len / 4), and target >= 4 * ranked. target + ranked stays within the tail and sorts a superset of the requested prefix; later reads still use the same correct ranked prefix.
+    '^src/lib\.rs:143:33: replace \- with \+ in Choices::rank_through$',
+]
