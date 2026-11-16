@@ -241,8 +241,35 @@ class PtyFz:
             if self.screen.lines() == expected:
                 return
             time.sleep(0.01)
-        raise AssertionError("screen never matched\nexpected: %r\nactual:   %r\nraw: %r" %
-                             (expected, self.screen.lines(), bytes(self.screen.raw[-400:])))
+        raise AssertionError("screen never matched\nexpected: %r\nactual:   %r\nraw: %r\n%s" %
+                             (expected, self.screen.lines(), bytes(self.screen.raw[-400:]), self.failure_context()))
+
+    def failure_context(self):
+        descriptor = self.proc.stderr.fileno()
+        os.set_blocking(descriptor, False)
+        stderr = bytearray()
+        for _ in range(4):
+            try:
+                chunk = os.read(descriptor, 4096)
+            except BlockingIOError:
+                break
+            if not chunk:
+                break
+            stderr.extend(chunk)
+        processes = {}
+        if sys.platform == "linux":
+            try:
+                children = Path("/proc/%d/task/%d/children" % (self.proc.pid, self.proc.pid)).read_text().split()[:8]
+            except OSError:
+                children = []
+            for pid in [str(self.proc.pid), *children]:
+                try:
+                    status = Path("/proc/%s/status" % pid).read_text()
+                    processes[pid] = [line for line in status.splitlines() if line.startswith(("Name:", "State:", "PPid:"))]
+                    processes[pid].append("wchan: " + Path("/proc/%s/wchan" % pid).read_text())
+                except OSError:
+                    processes[pid] = None
+        return "supervisor status=%r; processes=%r; stderr=%r" % (self.proc.poll(), processes, bytes(stderr))
 
     def wait_for_prefix(self, expected, timeout=2.0):
         """Use only when a test intentionally leaves lower rows unspecified."""
@@ -252,8 +279,8 @@ class PtyFz:
             if self.screen.lines()[:len(expected)] == expected:
                 return
             time.sleep(0.01)
-        raise AssertionError("screen prefix never matched\nexpected: %r\nactual:   %r" %
-                             (expected, self.screen.lines()))
+        raise AssertionError("screen prefix never matched\nexpected: %r\nactual:   %r\n%s" %
+                             (expected, self.screen.lines(), self.failure_context()))
 
     def wait_for_output(self, timeout=2.0):
         deadline = time.monotonic() + timeout
@@ -262,7 +289,7 @@ class PtyFz:
             if self.screen.raw:
                 return
             time.sleep(0.01)
-        raise AssertionError("fz did not render its initial interactive screen")
+        raise AssertionError("fz did not render its initial interactive screen\n" + self.failure_context())
 
     def wait_for_redraw_after(self, raw_size, timeout=2.0):
         deadline = time.monotonic() + timeout
@@ -335,6 +362,7 @@ class PtyFz:
     def close(self):
         if self.proc.poll() is None:
             self._wait(1.0)
+        self.proc.wait()
         stop = getattr(self, "_pump_stop", None)
         worker = getattr(self, "_pump", None)
         if stop is not None:
@@ -420,6 +448,13 @@ def deterministic_fixtures():
 
 
 class Acceptance(unittest.TestCase):
+    def test_supervisor_failure_preserves_the_infrastructure_marker(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.session(binary=Path(directory) / "missing-selector")
+            with self.assertRaisesRegex(AssertionError, "FZ_HARNESS_ERROR:"):
+                session.wait_for_lines([">"], timeout=0.5)
+
     def test_selection_does_not_require_pty_name_lookup(self):
         with patch.object(os, "ttyname", side_effect=OSError(errno.ERANGE, "Result too large")):
             session = self.session(b"alpha\nbeta\n")
