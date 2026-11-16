@@ -1,4 +1,4 @@
-scope = ["src/score.rs", "src/lib.rs", "src/cli.rs"]
+scope = ["src/score.rs", "src/lib.rs", "src/cli.rs", "src/terminal.rs", "src/termination.rs"]
 irrelevant = ["*.md", "LICENSE", "LICENSE.*"]
 budget_seconds = 1200
 timeout_seconds = 40
