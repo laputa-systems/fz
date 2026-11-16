@@ -38,7 +38,7 @@ def classify(path, status, config):
         return 'tests'
     if path.startswith(('tests/', 'fixtures/')):
         return 'fixtures'
-    if path in {'Cargo.toml', 'Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml', 'build.rs'} or path.startswith('.cargo/') or Path(path).name in {'Cargo.toml', 'Cargo.lock', 'build.rs'}:
+    if path in {'.gitignore', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml', 'build.rs'} or path.startswith('.cargo/') or Path(path).name in {'Cargo.toml', 'Cargo.lock', 'build.rs'}:
         return 'build configuration'
     return 'unclassified'
 

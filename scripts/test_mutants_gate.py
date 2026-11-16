@@ -20,6 +20,7 @@ class SelectionTests(unittest.TestCase):
     def test_classes(self):
         for path, status, expected in [
             ('README.md', 'M', 'irrelevant'), ('Cargo.lock', 'M', 'build configuration'),
+            ('.gitignore', 'M', 'build configuration'),
             ('.cargo/mutants.toml', 'M', 'gate'), ('src/main.rs', 'D', 'deleted production'),
             ('fixtures/data.json', 'A', 'fixtures'), ('other', 'M', 'unclassified'),
         ]:
