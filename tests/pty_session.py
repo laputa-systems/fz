@@ -46,7 +46,7 @@ def guard(watch_fd, slave, ignore_hangup, selector_foreground, args):
     child = None
     pending = []
 
-    def forward(signum, frame):
+    def forward(signum, _frame):
         if child is None:
             pending.append(signum)
         elif child.poll() is None:

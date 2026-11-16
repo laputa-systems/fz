@@ -27,15 +27,34 @@ Tests: [qualification report](docs/deslop-tests.md). The combined core, terminal
 
 ## Tickets
 
+Dead code: Vulture 2.16 identified one unused `Dataset.description` field and
+its four constructor values in `benches/perf.py`; these five lines are removed.
+Repository callers, benchmark tests, CLI output/JSON serialization, docs,
+manifests, workflows and ish's source-only vendor importer have no consumer
+of that field. `dataclasses.asdict` serializes `Sample`, not `Dataset`.
+Unused signal-frame and classmethod-receiver names are marked with underscores;
+their callbacks and unittest hooks remain. Vulture's two named allowlist
+entries are unittest-discovered `Acceptance` and `SessionLifetime`, with
+reasons in `pyproject.toml`. Use explicit `benches`, `scripts`, `tests` roots:
+excluding `.work` against an absolute worktree path would hide the whole scan.
+
+`cargo machete`, Rust warnings-denied checks and Ruff F401/F841 are clean;
+Vulture is clean with those two entries. Native macOS `make test lint
+mutants-selftest`, the benchmark harness's three tests and release-binary
+smoke pass. Linux and macOS CI remain required before merge. Shipped Rust,
+public APIs and dependencies are unchanged; consumer and runtime performance
+checks are unaffected because this field is never read by the workload.
+
+Debloat covered CLI parsing/dispatch, scoring and candidate/rank/picker layers,
+OS terminal/signal ownership, worker dispatch, tests, benchmarks, dependencies,
+CI and documentation. Existing layers serve distinct callers or real OS
+boundaries. The supervisor prevents demonstrated orphan processes; the mutation
+gate prevents demonstrated false passes; paired benchmark/oracle tooling guards
+declared behavior and cost. No further structural cut was established. No live
+feature, recovery path, compatibility behavior or declared gate is removed;
+there are no walk-back findings.
 
 
 
 
-### DSLP-5 · P2 · Dead code: tools and debloat
 
-- **Area:** deslop · dead code
-- **Where:** whole repository
-- **Problem:** No dead-code scan has run.
-- **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
-- **Fix with:** deslop
-- **Effort:** M
