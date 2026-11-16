@@ -221,7 +221,7 @@ class PtyFz:
                 return operation()
             except (InterruptedError, BlockingIOError):
                 return None
-        def handle(signum, frame):
+        def handle(signum, _frame):
             raise TimeoutError
         previous = signal.signal(signal.SIGALRM, handle)
         signal.setitimer(signal.ITIMER_REAL, max(seconds, 0.001))
@@ -496,7 +496,7 @@ class Acceptance(unittest.TestCase):
         self.assert_exit(session, b"br\t\r", 0, b"bar\n")
 
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(_cls):
         if BIN is None:
             raise AssertionError("usage: acceptance.py /path/to/fz")
         if not BIN.is_file():

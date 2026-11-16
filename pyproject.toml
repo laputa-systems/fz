@@ -1,0 +1,7 @@
+[tool.vulture]
+paths = ["benches", "scripts", "tests"]
+min_confidence = 60
+ignore_names = [
+    "Acceptance", # unittest discovers this test class when acceptance.py runs.
+    "SessionLifetime", # unittest discovers this test class when its module runs.
+]

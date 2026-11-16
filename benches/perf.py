@@ -59,7 +59,6 @@ class Query:
 @dataclasses.dataclass(frozen=True)
 class Dataset:
     name: str
-    description: str
     contents: bytes
     queries: Tuple[Query, ...]
 
@@ -271,7 +270,6 @@ def make_datasets(records: int = LARGE_RECORDS, small_records: int = SMALL_RECOR
     return {
         "small": Dataset(
             "small",
-            "130 representative paths and filenames",
             bytes(small_contents),
             (
                 Query("empty", "", "some"),
@@ -284,7 +282,6 @@ def make_datasets(records: int = LARGE_RECORDS, small_records: int = SMALL_RECOR
         ),
         "numeric_100k": Dataset(
             "numeric_100k",
-            "100,000 distinct five-digit records",
             numeric_input(records),
             (
                 Query("empty", "", "some"),
@@ -297,7 +294,6 @@ def make_datasets(records: int = LARGE_RECORDS, small_records: int = SMALL_RECOR
         ),
         "paths_100k": Dataset(
             "paths_100k",
-            "100,000 deterministic, varied source-tree paths",
             path_input(records),
             (
                 Query("empty", "", "some"),
@@ -310,7 +306,6 @@ def make_datasets(records: int = LARGE_RECORDS, small_records: int = SMALL_RECOR
         ),
         "long_boundary": Dataset(
             "long_boundary",
-            "128 candidates at 1000, 1023, 1024, 1025, 1152, and 1536 bytes",
             long_input(small_records),
             (
                 Query("empty", "", "some"),
