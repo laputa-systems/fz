@@ -1,9 +1,10 @@
 # Tests qualification
 
-The core mutation lane is qualified for `src/score.rs`, `src/lib.rs` and
-`src/cli.rs`. Production Rust is unchanged from main `0c6e74b`. Terminal
-and termination mutation qualification remains in DSLP-4; these modules
-contain another 160 and 31 mutants and belong in the next bounded slice.
+The mutation lane is qualified for `src/score.rs`, `src/lib.rs`, `src/cli.rs`,
+`src/terminal.rs` and `src/termination.rs`. The terminal slice merged as
+`17d0e665a6ed881765adaffa04957f12251d3e82`. Its restoration loop delegates
+to Rustix's existing EINTR helper; public contracts are unchanged. DSLP-4
+remains open until the declared terminal performance check is complete.
 
 ## Measurements
 
@@ -82,7 +83,7 @@ offset representation is exercised through `from_records`, and the size
 switch uses checked standard-library conversion. The remaining unrun score
 branches are impossible finite-alignment states or equivalent flag and
 backtrace operations, documented individually in the exclusion config.
-Terminal and signal decision regions are being qualified in the next DSLP-4 slice.
+Terminal and signal decision regions have the dispositions below.
 
 ## Terminal and signal follow-up
 
@@ -123,14 +124,39 @@ Escape cancellation after resize, zero-size geometry, ignoring poll errors,
 and replacing the ignored-HUP predicate. The HUP fault exits 129 instead of
 selecting `beta`. Native macOS `make test lint mutants-selftest` passes with
 the pinned fzy oracle; native Linux foreground and acceptance pass, with
-the two differential cases left to the pinned-oracle CI jobs. The final
-mutation qualification remains pending. The first final-scope run selected
+the two differential cases exercised in the pinned-oracle CI jobs. The first final-scope run selected
 448 and reported 432 caught, zero missed, 16 unviable and no timeouts, but
 the gate rejected its counts: the supervisor tried to install a handler for
 SIGKILL when cleanup killed a faulty selector. That raised EINVAL and the
 infrastructure marker. A new supervisor self-test reproduces the incorrect
 exit 1 before the fix and the propagated SIGKILL afterward. The gate's
 rejection is retained; those catch counts are not accepted evidence.
+
+The next run was also rejected: three resize/arrow scenarios mislabeled a
+selector's real diagnostic as a missed delivery window. Late attempts now
+must still satisfy the complete bare-Escape cancellation contract. A hand
+fault disabling the signalfd guard fails on the actual diagnostic without
+an infrastructure marker. No rejected run establishes qualification.
+
+The [final run](https://github.com/laputa-systems/fz/actions/runs/43870572243)
+at reviewed head `e70ae7820768be56c91fe1ce14a42326454b6854` selected 448:
+432 caught, zero missed, 16 unviable, zero timeouts, with no infrastructure
+markers. Gate wall time was 874.6 seconds within its 1,200-second budget.
+The configuration SHA-256 was
+`af91a513b5b689bb227738d7dc2c74bcbe772e011d0ee57cdec6ca78d5e4776d`.
+The 103 exact exclusions comprise 64 macOS decisions, 38 equivalents and
+one private diagnostic body. All Linux, macOS, lint and mutation checks
+passed on that head before PR #37 merged.
+
+Consumer validation uses an isolated ish `ff70621f` clone and its importer,
+with `vendor/fz/UPSTREAM` resolving the merged candidate `17d0e665`.
+`cpu-guard --cores 6 -- make test` passes, including the real worker and
+PTY scenarios; existing ignored tests remain ignored. The importer retains
+explicit upstream test targets without copying their files. Removing only
+that unavailable manifest target in the fixture allows Cargo to load the
+exact candidate library sources; the importer defect needs its own fix.
+The declared release-process terminal workload remains pending: the host
+gate returned 75 with load above its limit. This is not a performance pass.
 
 After-coverage on native macOS is 90.94% lines and 77.49% branches, against
 89.63% and 75.92% before this slice. Five interleaved warm `make test`
