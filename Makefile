@@ -9,7 +9,7 @@ comma      := ,
 RELEASE_RUSTFLAGS := -Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort $(if $(findstring apple-darwin,$(TARGET)),-Clink-arg=-Wl$(comma)-dead_strip_dylibs)
 cargo = $(if $(findstring -linux-musl,$(TARGET)),,$(if $(filter release-static test,$(1)),CARGO_TARGET_$(TARGET_ENV)_LINKER=clang ,)$(if $(filter release-static,$(1)),RUSTFLAGS="$(RELEASE_RUSTFLAGS)")) MUSL_TARGET="$(TARGET)" MUSL_BUILD_MODE="$(1)" $(CARGO_CMD)
 
-.PHONY: build test test-ci lint release verify-release install
+.PHONY: build test test-ci lint coverage mutants-selftest mutants-diff release verify-release install
 
 build:
 	$(call cargo,dev) build
@@ -22,6 +22,18 @@ test-ci:
 
 lint:
 	cargo clippy --all-targets --all-features -- --deny warnings
+
+coverage:
+	cargo llvm-cov --branch --html --output-dir .work/coverage
+	cargo llvm-cov report --branch --summary-only
+
+BASE ?= origin/main
+
+mutants-selftest:
+	python3 -B -m unittest discover -s scripts -p 'test_mutants_gate.py'
+
+mutants-diff: mutants-selftest
+	python3 -B scripts/mutants_gate.py "$(BASE)"
 
 release:
 	$(call cargo,release-static) clean -p $(NAME) --profile dist --target $(TARGET)
