@@ -23,6 +23,7 @@ Upstream acceptance mapping:
 """
 
 import codecs
+import atexit
 import errno
 import os
 import pty
@@ -42,6 +43,37 @@ BIN = Path(sys.argv[1]).resolve() if len(sys.argv) == 2 else None
 ESC = b"\x1b"
 LEFT = b"\x1b[D"
 RIGHT = b"\x1b[C"
+SESSIONS = {}
+PID_FILE = os.environ.get("FZ_SESSION_PIDS")
+
+
+def save_sessions():
+    if PID_FILE:
+        temporary = PID_FILE + ".new"
+        with open(temporary, "w") as output:
+            output.writelines("%d\n" % pid for pid in SESSIONS)
+        os.replace(temporary, PID_FILE)
+
+
+def stop_sessions():
+    for pid, process in list(SESSIONS.items()):
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=2)
+        SESSIONS.pop(pid, None)
+    save_sessions()
+
+
+def stop_on_signal(signum, frame):
+    stop_sessions()
+    os._exit(128 + signum)
+
+
+atexit.register(stop_sessions)
+for termination_signal in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    signal.signal(termination_signal, stop_on_signal)
 
 
 def width(ch):
@@ -139,6 +171,37 @@ def ignore_sighup():
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
 
+def spawn_session(args, *, ignore_hangup=False, **kwargs):
+    blocked = signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGTERM, signal.SIGINT, signal.SIGHUP))
+    try:
+        def prepare_child():
+            signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+            if ignore_hangup:
+                ignore_sighup()
+        proc = subprocess.Popen(args, start_new_session=True, preexec_fn=prepare_child, **kwargs)
+        SESSIONS[proc.pid] = proc
+        save_sessions()
+        return proc
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+
+
+def run_session(args, data):
+    proc = spawn_session(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        stdout, stderr = proc.communicate(input=data, timeout=5)
+        return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+    finally:
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait(timeout=2)
+        SESSIONS.pop(proc.pid, None)
+        save_sessions()
+
+
 class PtyFz:
     def __init__(self, candidates=b"", args=(), rows=24, cols=80, close_stdin=True,
                  binary=None, ignore_hangup=False):
@@ -154,10 +217,10 @@ class PtyFz:
         # and remains queryable, so use it for the restoration assertion.
         self.original_termios = termios.tcgetattr(self.master)
         self.screen = Screen(rows, cols)
-        self.proc = subprocess.Popen(
+        self.proc = spawn_session(
             [str(binary or BIN), *args, "--tty", os.ttyname(self.slave)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True, preexec_fn=ignore_sighup if ignore_hangup else None,
+            ignore_hangup=ignore_hangup,
         )
         if candidates is not None:
             self.write_stdin(candidates)
@@ -305,7 +368,7 @@ class PtyFz:
                 time.sleep(0.01)
             if self.proc.poll() is None:
                 self.proc.kill()
-            self.proc.wait()
+            self.proc.wait(timeout=2)
         finally:
             stop.set()
             worker.join(timeout=0.05)
@@ -354,11 +417,12 @@ class PtyFz:
         for stream in (self.proc.stdin, self.proc.stdout, self.proc.stderr):
             if stream and not stream.closed:
                 stream.close()
+        SESSIONS.pop(self.proc.pid, None)
+        save_sessions()
 
 
 def run_fz(args=(), data=b""):
-    return subprocess.run([str(BIN), *args], input=data, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, check=False, timeout=5)
+    return run_session([str(BIN), *args], data)
 
 
 def pty_outcome(binary, candidates, args, keys):
@@ -832,8 +896,7 @@ class Acceptance(unittest.TestCase):
         data, queries = deterministic_fixtures()
         for query in queries:
             ours = run_fz(("-e", query, "-s"), data)
-            upstream = subprocess.run([str(oracle), "-e", query, "-s"], input=data,
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            upstream = run_session([str(oracle), "-e", query, "-s"], data)
             self.assertEqual(ours.returncode, upstream.returncode, query)
             self.assertEqual(ours.stderr, upstream.stderr, query)
             self.assertEqual(ours.stdout, upstream.stdout,

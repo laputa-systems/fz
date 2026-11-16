@@ -25,10 +25,12 @@
 
 ## Verification
 
-- `cpu-guard --cores 6 -- make test`: cold 15.65s, warm 6.99s; Python 3 required.
-- `cpu-guard --cores 6 -- make lint`: 2.34s (macOS arm64, warm target).
+- Edit: `cargo test --test core <test-name>` for matcher regressions; cost unmeasured. Wrap builds and tests in `cpu-guard --cores 6 --`.
+- Change: `cpu-guard --cores 6 -- make test`, cold 15.65s, warm 6.99s; `cpu-guard --cores 6 -- make lint`, warm 2.34s (macOS arm64); Python 3 required, 3.11+ for the mutation gate.
+- Scenario: branch coverage and scoped mutations of score, lib, CLI and picker; proof incomplete because intermittent PTY lookup failures can falsely catch mutants (DSLP-9); cleanup fix is pending acceptance (DSLP-8).
+- Full, manual only: `benches/bench.rs`, `benches/perf.py` and `benches/test_perf.py`; costs unmeasured.
 - CLI flags, byte input, filter output, errors and exit codes: `tests/cli.rs`; interactive keys, terminal output, cancellation and multi-select: `tests/acceptance.py`, `tests/default_tty.rs`.
-- Differential CLI and interactive oracle cases in `tests/acceptance.py` skip without fzy; PR CI does not provision it; `benches/test_perf.py` is not in `make test`.
+- Differential CLI and interactive oracle cases in `tests/acceptance.py` skip without fzy; PR CI does not provision it (DSLP-6). Its Python runner reports the skip count.
 - Public matcher, scoring, rank and Choices API: `tests/core.rs`; Candidates: `tests/candidates.rs`; Picker: `tests/picker.rs`. CLI `run` is exercised by `tests/cli.rs`; `run_in_foreground` and `worker_help`: none.
 - Persistent file formats, wire formats, endpoints: none.
 - Performance: `benches/bench.rs` and `benches/perf.py` cover matcher, filtering and terminal redraw; see `benches/README.md` for workloads and prerequisites.

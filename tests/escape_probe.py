@@ -26,6 +26,9 @@ proc = subprocess.Popen(
     stderr=subprocess.PIPE,
     start_new_session=True,
 )
+if os.environ.get("FZ_SESSION_PIDS"):
+    with open(os.environ["FZ_SESSION_PIDS"], "w") as output:
+        output.write("%d\n" % proc.pid)
 proc.stdin.write(b"foo\nbar\n")
 proc.stdin.close()
 
@@ -114,6 +117,9 @@ deadline = time.monotonic() + 1.5
 while time.monotonic() < deadline:
     code = proc.poll()
     if code is not None:
+        if os.environ.get("FZ_SESSION_PIDS"):
+            with open(os.environ["FZ_SESSION_PIDS"], "w"):
+                pass
         print("probe-exited", code, flush=True)
         os._exit(0 if code == 1 else 3)
     time.sleep(0.02)
