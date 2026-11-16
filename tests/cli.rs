@@ -138,14 +138,15 @@ fn native_input_errors_and_worker_limits() {
         .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/thread_count.c"))
         .arg("-o").arg(&library).args(["-ldl", "-pthread"]).status().unwrap();
     assert!(status.success());
+    let input_file = scratch.0.join("input");
+    std::fs::write(&input_file, b"alpha\n").unwrap();
     for (error, code, stdout) in [(libc::EINTR, 0, b"alpha\n".as_slice()),
                                   (libc::EIO, 1, b"".as_slice())] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_fz"))
             .args(["-e", "a"]).env("LD_PRELOAD", &library)
             .env("FZ_READ_ERROR", error.to_string())
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+            .stdin(std::fs::File::open(&input_file).unwrap()).stdout(Stdio::piped()).stderr(Stdio::piped())
             .spawn().unwrap();
-        child.stdin.take().unwrap().write_all(b"alpha\n").unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
         while child.try_wait().unwrap().is_none() {
             if Instant::now() >= deadline {
@@ -174,4 +175,12 @@ fn native_input_errors_and_worker_limits() {
         assert_eq!(output.stdout, b"aaaa\n");
         assert_eq!(output.stderr, count);
     }
+    std::fs::write(&input_file, b"x\n".repeat(524_288)).unwrap();
+    let output = Command::new("python3").args(["-c",
+        "import os,resource,sys; resource.setrlimit(resource.RLIMIT_AS,(128*1024*1024,128*1024*1024)); os.execv(sys.argv[1],sys.argv[1:])",
+        env!("CARGO_BIN_EXE_fz"), "--workers", "1", "-e", "z"])
+        .stdin(std::fs::File::open(&input_file).unwrap()).output().unwrap();
+    assert!(output.status.success(), "1 MiB of records exceeded 128 MiB: {:?}", output);
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
 }
