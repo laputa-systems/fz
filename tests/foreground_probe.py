@@ -68,6 +68,23 @@ for candidates in (b"alpha\nbeta\n", None):
             assert result == (143, b"", b""), result
         finally:
             os.environ.pop("FZ_WORKER_TERM_CONTROL", None)
+with tempfile.NamedTemporaryFile() as control:
+    os.environ["FZ_WORKER_TERM_CONTROL"] = control.name
+    os.environ["FZ_WORKER_SIGNAL"] = "HUP"
+    try:
+        def ignored_hangup(session):
+            control.write(b"terminate")
+            control.flush()
+            deadline = time.monotonic() + 2
+            while Path(control.name).read_bytes() != b"delivered":
+                assert time.monotonic() < deadline, "HUP was not delivered"
+                time.sleep(.001)
+            session.send(b"b\r")
+        result = run([], action=ignored_hangup)
+        assert result == (0, b"beta\n", b""), result
+    finally:
+        os.environ.pop("FZ_WORKER_TERM_CONTROL", None)
+        os.environ.pop("FZ_WORKER_SIGNAL", None)
 code, help_stdout, help_text = run(["--help"])
 assert code == 0
 assert help_stdout == b""
@@ -100,9 +117,16 @@ if sys.platform == "linux":
             code, stdout, diagnostics = run([], b"b\r")
             assert (code, stdout) == (1, b"")
             assert b"os error 24" in diagnostics, diagnostics
+            os.environ.pop("FZ_SIGNALFD_ERROR")
+            os.environ["FZ_PENDING_POLL_ERROR"] = str(errno.ENOMEM)
+            code, stdout, diagnostics = run([], b"b\r")
+            assert (code, stdout) == (1, b"")
+            assert b"os error 12" in diagnostics, diagnostics
+            os.environ.pop("FZ_PENDING_POLL_ERROR")
         finally:
             os.environ.pop("LD_PRELOAD", None)
             os.environ.pop("FZ_READ_ERROR", None)
             os.environ.pop("FZ_TTY_READ_ERROR", None)
             os.environ.pop("FZ_SIGNALFD_ERROR", None)
+            os.environ.pop("FZ_PENDING_POLL_ERROR", None)
 print("foreground worker selection, cancellation, pending input and help passed")

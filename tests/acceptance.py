@@ -648,6 +648,46 @@ class Acceptance(unittest.TestCase):
             session.close()
         self.fail("harness never delivered the arrow fragments within the window; gaps in ms: %s" % gaps)
 
+    def test_resize_does_not_end_an_unexpired_arrow_sequence(self):
+        gaps = []
+        for _ in range(10):
+            session = self.session(b"foo\nbar\n")
+            session.wait_for_lines([">", "foo", "bar"])
+            started = time.monotonic()
+            previous = len(session.screen.raw)
+            session.send(ESC)
+            deadline = started + .020
+            def redrawn():
+                while time.monotonic() < deadline:
+                    session.drain(.0005)
+                    if len(session.screen.raw) > previous:
+                        return True
+                    time.sleep(.0001)
+                return False
+            if not redrawn():
+                session.close()
+                continue
+            previous = len(session.screen.raw)
+            os.kill(session.proc.pid, signal.SIGWINCH)
+            if not redrawn():
+                session.close()
+                continue
+            gap = time.monotonic() - started
+            gaps.append(gap)
+            if gap >= .020:
+                session.close()
+                continue
+            self.assert_exit(session, b"[A\r", 0, b"bar\n")
+            return
+        raise AssertionError("FZ_HARNESS_ERROR: no resize/arrow delivery within 20 ms: %r" % gaps)
+
+    def test_zero_terminal_dimension_uses_default_geometry(self):
+        for rows, cols in ((0, 12), (12, 0)):
+            session = self.session(b"a candidate longer than twelve columns\nother\n", rows=rows, cols=cols)
+            session.screen = Screen(24, 80)
+            session.wait_for_lines([">", "a candidate longer than twelve columns", "other"])
+            self.assert_exit(session, b"\r", 0, b"a candidate longer than twelve columns\n")
+
     def test_sigwinch_redraw_preserves_editor_and_tty_contract(self):
         session = self.session(b"foo\nbar\n")
         session.wait_for_lines([">", "foo", "bar"])

@@ -44,6 +44,11 @@ fn main() {
         let original = caller_signal_state();
         let signal_thread = std::env::var_os("FZ_WORKER_TERM_CONTROL").map(|path| {
             assert_eq!(rounds, 1);
+            let signal = match std::env::var("FZ_WORKER_SIGNAL").as_deref() {
+                Err(_) | Ok("TERM") => libc::SIGTERM,
+                Ok("HUP") => libc::SIGHUP,
+                Ok(other) => panic!("unknown controlled signal: {other}"),
+            };
             std::thread::spawn(move || {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
                 while std::fs::read(&path).unwrap() != b"terminate" {
@@ -55,10 +60,11 @@ fn main() {
                 unsafe {
                     let mut set: libc::sigset_t = std::mem::zeroed();
                     assert_eq!(libc::sigemptyset(&mut set), 0);
-                    assert_eq!(libc::sigaddset(&mut set, libc::SIGTERM), 0);
+                    assert_eq!(libc::sigaddset(&mut set, signal), 0);
                     assert_eq!(libc::pthread_sigmask(libc::SIG_UNBLOCK, &set, std::ptr::null_mut()), 0);
-                    assert_eq!(libc::raise(libc::SIGTERM), 0);
+                    assert_eq!(libc::raise(signal), 0);
                 }
+                std::fs::write(&path, b"delivered").unwrap();
             })
         });
         let mut status = 0;

@@ -740,21 +740,9 @@ impl Terminal {
             result
         } else { Ok(()) };
         let termios_result = if self.restore_needed {
-            loop {
-                match termios::tcsetattr(&self.input, OptionalActions::Now, &self.original) {
-                    Ok(()) => {
-                        self.restore_needed = false;
-                        break Ok(());
-                    }
-                    Err(error) => {
-                        let error = io::Error::from(error);
-                        if error.kind() == io::ErrorKind::Interrupted {
-                            continue;
-                        }
-                        break Err(error);
-                    }
-                }
-            }
+            rustix::io::retry_on_intr(|| termios::tcsetattr(&self.input, OptionalActions::Now, &self.original))
+                .map(|()| self.restore_needed = false)
+                .map_err(io::Error::from)
         } else {
             Ok(())
         };

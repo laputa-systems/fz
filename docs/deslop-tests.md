@@ -82,7 +82,49 @@ offset representation is exercised through `from_records`, and the size
 switch uses checked standard-library conversion. The remaining unrun score
 branches are impossible finite-alignment states or equivalent flag and
 backtrace operations, documented individually in the exclusion config.
-Terminal and signal decision regions await the next DSLP-4 slice.
+Terminal and signal decision regions are being qualified in the next DSLP-4 slice.
+
+## Terminal and signal follow-up
+
+The first Linux extension at `0973191` selected 546 mutants: 422 caught,
+106 missed, 18 unviable, no timeouts. Fifteen were test helpers because the
+tool does not recognize a combined `cfg(all(test, target_os = "linux"))`.
+Splitting the attributes preserves compiled behavior and removes them from
+production discovery. At `d499615`, the 531 production decisions produced
+427 caught, 88 missed, 16 unviable and no timeouts in
+[run 43856529550](https://github.com/laputa-systems/fz/actions/runs/43856529550).
+
+The remaining survivor dispositions are exact entries in `.cargo/mutants.toml`:
+64 macOS decisions are unobservable in the Linux lane and remain covered by
+native macOS acceptance and foreground probes. Eleven changed sentinels
+cannot differ for valid fixed signals and initialized ABI records; three
+OR/XOR flag mutations pass identical disjoint bits. Two signalfd guards
+cannot differ under the [Linux record and readiness contract](https://man7.org/linux/man-pages/man2/signalfd.2.html).
+The signal preconditions follow [sigsetops](https://man7.org/linux/man-pages/man3/sigsetops.3.html)
+and [sigaction](https://man7.org/linux/man-pages/man2/sigaction.2.html).
+One redundant field destructor follows Terminal's completed restoration.
+One private display body is diagnostic glue; the CLI downcasts that error
+into signal status without printing it. No observable behavior is excluded
+as an owner-accepted risk.
+
+New public-boundary probes check exact caller signal masks and dispositions,
+two foreground calls in one process, ignored HUP, termination delivered on
+a helper thread, pending-file EOF, real TTY EINTR/EIO, signalfd refusal,
+resize during an unexpired arrow sequence and fallback geometry when one
+terminal dimension is zero. A disposable Linux syscall filter refuses the
+readiness poll with ENOMEM: Rustix's raw backend bypasses C interceptors,
+so a libc interposition alone was an invalid probe. Failure to install the
+filter emits the infrastructure marker. The shipped backend is unchanged.
+Terminal restoration uses Rustix's existing `retry_on_intr` contract instead
+of duplicating its EINTR loop; cleanup still runs for every guard afterward.
+
+Restored negative controls each fail the intended new assertion: an early
+Escape cancellation after resize, zero-size geometry, ignoring poll errors,
+and replacing the ignored-HUP predicate. The HUP fault exits 129 instead of
+selecting `beta`. Native macOS `make test lint mutants-selftest` passes with
+the pinned fzy oracle; native Linux foreground and acceptance pass, with
+the two differential cases left to the pinned-oracle CI jobs. The final
+mutation run, after-coverage and paired test-cost gate remain pending.
 
 ## Harness and gate controls
 
