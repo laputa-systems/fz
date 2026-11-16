@@ -33,3 +33,4 @@
 - Persistent file formats, wire formats, endpoints: none.
 - Performance: `benches/bench.rs` and `benches/perf.py` cover matcher, filtering and terminal redraw; see `benches/README.md` for workloads and prerequisites.
 - Library consumer: ish vendors fz; run ish tests against the candidate for affected API changes.
+- PTY selector lifetime: `tests/test_pty_session.py` kills the driver with TERM and KILL and verifies that a selector ignoring TERM and HUP is reaped. Both PTY harnesses use `tests/pty_session.py`.

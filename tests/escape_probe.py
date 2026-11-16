@@ -11,6 +11,7 @@ import sys
 import termios
 import threading
 import time
+from pty_session import Session
 
 binary = sys.argv[1]
 master, slave = pty.openpty()
@@ -18,19 +19,7 @@ fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
 for fd in (master, slave):
     flags = fcntl.fcntl(fd, fcntl.F_GETFD)
     fcntl.fcntl(fd, fcntl.F_SETFD, flags | fcntl.FD_CLOEXEC)
-def prepare_terminal():
-    fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
-
-
-proc = subprocess.Popen(
-    [binary, "--tty", "/dev/tty"],
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-    pass_fds=(slave,),
-    start_new_session=True,
-    preexec_fn=prepare_terminal,
-)
+proc = Session([binary, "--tty", "/dev/tty"], slave)
 proc.stdin.write(b"foo\nbar\n")
 proc.stdin.close()
 

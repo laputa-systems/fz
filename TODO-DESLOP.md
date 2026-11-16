@@ -47,14 +47,6 @@ No contracts changed; witnesses not applicable. macOS lint and test passed; two 
 - **Effort:** M
 
 
-### DSLP-8 · P2 · Mutation timeouts leave selector processes running
-
-- **Area:** Tests · process lifetime
-- **Where:** tests/acceptance.py:157-160, tests/acceptance.rs:31-45
-- **Problem:** During the DSLP-4 cargo-mutants run, 30-second timeouts left mutated fz processes reparented to PID 1 and consuming CPU. For example, the src/lib.rs and src/cli.rs run with --timeout 30 --jobs 4 produced orphaned processes under .work/tmp/cargo-mutants-tests-*/target/debug/fz; the PTY harness starts each selector in a new session. This contaminates mutation timing and can compromise later checks.
-- **Recommendation:** Make the acceptance process tree terminate and be reaped when the mutation runner times out, including selectors in separate sessions; demonstrate that a timed-out mutant leaves no live descendants before repeating the mutation proof.
-- **Fix with:** test-audit
-- **Effort:** M
 
 
 ### DSLP-9 · P2 · PTY name lookup causes false mutation catches on macOS
