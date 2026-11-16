@@ -216,6 +216,11 @@ class PtyFz:
     def _read_master_like(self, operation, seconds):
         if seconds <= 0:
             return None
+        if sys.platform != "darwin":
+            try:
+                return operation()
+            except (InterruptedError, BlockingIOError):
+                return None
         def handle(signum, frame):
             raise TimeoutError
         previous = signal.signal(signal.SIGALRM, handle)
@@ -448,6 +453,27 @@ def deterministic_fixtures():
 
 
 class Acceptance(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "linux", "Linux nonblocking PTY reads")
+    def test_alarm_does_not_drop_consumed_terminal_output(self):
+        session = self.session(b"foo\nbar\n")
+        original_read = os.read
+        alarms = []
+
+        def read(descriptor, count):
+            data = original_read(descriptor, count)
+            if descriptor == session.master and data:
+                signal.raise_signal(signal.SIGALRM)
+            return data
+
+        previous = signal.signal(signal.SIGALRM, lambda *_: alarms.append(True))
+        try:
+            with patch.object(os, "read", read):
+                session.wait_for_lines([">", "foo", "bar"])
+        finally:
+            signal.signal(signal.SIGALRM, previous)
+        self.assertTrue(alarms)
+        self.assert_exit(session, b"\r", 0, b"foo\n")
+
     def test_supervisor_failure_preserves_the_infrastructure_marker(self):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
