@@ -139,7 +139,7 @@ class Screen:
 
 class PtyFz:
     def __init__(self, candidates=b"", args=(), rows=24, cols=80, close_stdin=True,
-                 binary=None, ignore_hangup=False):
+                 binary=None, ignore_hangup=False, foreground_owner="selector"):
         self.master, self.slave = pty.openpty()
         import fcntl
         import struct
@@ -153,7 +153,7 @@ class PtyFz:
         self.original_termios = termios.tcgetattr(self.master)
         self.screen = Screen(rows, cols)
         self.proc = Session([str(binary or BIN), *args, "--tty", "/dev/tty"],
-                            self.slave, ignore_hangup)
+                            self.slave, ignore_hangup, foreground_owner=foreground_owner)
         if candidates is not None:
             self.write_stdin(candidates)
             if close_stdin:
@@ -216,6 +216,11 @@ class PtyFz:
     def _read_master_like(self, operation, seconds):
         if seconds <= 0:
             return None
+        if sys.platform != "darwin":
+            try:
+                return operation()
+            except (InterruptedError, BlockingIOError):
+                return None
         def handle(signum, frame):
             raise TimeoutError
         previous = signal.signal(signal.SIGALRM, handle)
@@ -241,8 +246,35 @@ class PtyFz:
             if self.screen.lines() == expected:
                 return
             time.sleep(0.01)
-        raise AssertionError("screen never matched\nexpected: %r\nactual:   %r\nraw: %r" %
-                             (expected, self.screen.lines(), bytes(self.screen.raw[-400:])))
+        raise AssertionError("screen never matched\nexpected: %r\nactual:   %r\nraw: %r\n%s" %
+                             (expected, self.screen.lines(), bytes(self.screen.raw[-400:]), self.failure_context()))
+
+    def failure_context(self):
+        descriptor = self.proc.stderr.fileno()
+        os.set_blocking(descriptor, False)
+        stderr = bytearray()
+        for _ in range(4):
+            try:
+                chunk = os.read(descriptor, 4096)
+            except BlockingIOError:
+                break
+            if not chunk:
+                break
+            stderr.extend(chunk)
+        processes = {}
+        if sys.platform == "linux":
+            try:
+                children = Path("/proc/%d/task/%d/children" % (self.proc.pid, self.proc.pid)).read_text().split()[:8]
+            except OSError:
+                children = []
+            for pid in [str(self.proc.pid), *children]:
+                try:
+                    status = Path("/proc/%s/status" % pid).read_text()
+                    processes[pid] = [line for line in status.splitlines() if line.startswith(("Name:", "State:", "PPid:"))]
+                    processes[pid].append("wchan: " + Path("/proc/%s/wchan" % pid).read_text())
+                except OSError:
+                    processes[pid] = None
+        return "supervisor status=%r; processes=%r; stderr=%r" % (self.proc.poll(), processes, bytes(stderr))
 
     def wait_for_prefix(self, expected, timeout=2.0):
         """Use only when a test intentionally leaves lower rows unspecified."""
@@ -252,8 +284,8 @@ class PtyFz:
             if self.screen.lines()[:len(expected)] == expected:
                 return
             time.sleep(0.01)
-        raise AssertionError("screen prefix never matched\nexpected: %r\nactual:   %r" %
-                             (expected, self.screen.lines()))
+        raise AssertionError("screen prefix never matched\nexpected: %r\nactual:   %r\n%s" %
+                             (expected, self.screen.lines(), self.failure_context()))
 
     def wait_for_output(self, timeout=2.0):
         deadline = time.monotonic() + timeout
@@ -262,7 +294,7 @@ class PtyFz:
             if self.screen.raw:
                 return
             time.sleep(0.01)
-        raise AssertionError("fz did not render its initial interactive screen")
+        raise AssertionError("fz did not render its initial interactive screen\n" + self.failure_context())
 
     def wait_for_redraw_after(self, raw_size, timeout=2.0):
         deadline = time.monotonic() + timeout
@@ -335,6 +367,7 @@ class PtyFz:
     def close(self):
         if self.proc.poll() is None:
             self._wait(1.0)
+        self.proc.wait()
         stop = getattr(self, "_pump_stop", None)
         worker = getattr(self, "_pump", None)
         if stop is not None:
@@ -420,6 +453,34 @@ def deterministic_fixtures():
 
 
 class Acceptance(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "linux", "Linux nonblocking PTY reads")
+    def test_alarm_does_not_drop_consumed_terminal_output(self):
+        session = self.session(b"foo\nbar\n")
+        original_read = os.read
+        alarms = []
+
+        def read(descriptor, count):
+            data = original_read(descriptor, count)
+            if descriptor == session.master and data:
+                signal.raise_signal(signal.SIGALRM)
+            return data
+
+        previous = signal.signal(signal.SIGALRM, lambda *_: alarms.append(True))
+        try:
+            with patch.object(os, "read", read):
+                session.wait_for_lines([">", "foo", "bar"])
+        finally:
+            signal.signal(signal.SIGALRM, previous)
+        self.assertTrue(alarms)
+        self.assert_exit(session, b"\r", 0, b"foo\n")
+
+    def test_supervisor_failure_preserves_the_infrastructure_marker(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.session(binary=Path(directory) / "missing-selector")
+            with self.assertRaisesRegex(AssertionError, "FZ_HARNESS_ERROR:"):
+                session.wait_for_lines([">"], timeout=0.5)
+
     def test_selection_does_not_require_pty_name_lookup(self):
         with patch.object(os, "ttyname", side_effect=OSError(errno.ERANGE, "Result too large")):
             session = self.session(b"alpha\nbeta\n")
@@ -948,7 +1009,7 @@ class MultiSelectionTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    result = unittest.main(argv=[sys.argv[0]], verbosity=2, exit=False).result
+    result = unittest.main(argv=[sys.argv[0]], verbosity=2, exit=False, failfast=True).result
     if result.errors:
         print("FZ_HARNESS_ERROR: acceptance setup or driver failed", file=sys.stderr)
         sys.exit(86)
