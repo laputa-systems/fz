@@ -4,7 +4,7 @@ The mutation lane is qualified for `src/score.rs`, `src/lib.rs`, `src/cli.rs`,
 `src/terminal.rs` and `src/termination.rs`. The terminal slice merged as
 `17d0e665a6ed881765adaffa04957f12251d3e82`. Its restoration loop delegates
 to Rustix's existing EINTR helper; public contracts are unchanged. DSLP-4
-remains open until the declared terminal performance check is complete.
+is complete, including the subsequent consumer and terminal workload checks.
 
 ## Measurements
 
@@ -155,8 +155,34 @@ PTY scenarios; existing ignored tests remain ignored. The importer retains
 explicit upstream test targets without copying their files. Removing only
 that unavailable manifest target in the fixture allows Cargo to load the
 exact candidate library sources; the importer defect needs its own fix.
-The declared release-process terminal workload remains pending: the host
-gate returned 75 with load above its limit. This is not a performance pass.
+An initial busy-host gate deferred runtime measurement. After the host gate
+passed, five interleaved baseline/candidate pairs ran the declared terminal
+workload on macOS arm64, default features, identical lockfiles and release
+profiles. Each side used `python3 benches/perf.py --interactive-only`, one
+warmup and five repetitions, the pinned fzy oracle and the 100k-path fixture.
+Every side passed `perf-gate-ready` before and `perf-gate-ready -1` after.
+The baseline is core head `2157b68`; the candidate is merged `17d0e665`.
+
+Each cell is the median of five run medians, with their range, in milliseconds.
+
+| Mode / redraw | Before | After |
+| --- | ---: | ---: |
+| default / dense | 2.769 (2.748–3.113) | 2.771 (2.734–2.820) |
+| default / selective | 0.805 (0.778–0.922) | 0.792 (0.782–0.812) |
+| default / no match | 0.326 (0.315–0.477) | 0.320 (0.314–0.334) |
+| default / exact | 0.846 (0.828–0.871) | 0.819 (0.806–0.861) |
+| default / longer | 0.824 (0.820–0.966) | 0.818 (0.807–0.827) |
+| serial / dense | 9.982 (9.793–10.286) | 9.974 (9.965–10.238) |
+| serial / selective | 2.674 (2.589–2.742) | 2.663 (2.634–2.793) |
+| serial / no match | 0.899 (0.872–0.914) | 0.910 (0.887–0.932) |
+| serial / exact | 2.744 (2.644–2.865) | 2.727 (2.702–2.807) |
+| serial / longer | 2.713 (2.644–2.841) | 2.740 (2.708–2.794) |
+
+All latency ranges overlap; no regression exceeds both the observed spread
+and 2%. Peak RSS medians are 9,732,096 bytes on both sides in default mode;
+serial rises from 8,880,128 to 8,896,512 bytes (0.18%). Release size is
+600,144 bytes before and 583,632 after; no size growth. This check covers
+the terminal-restoration path; unchanged matcher/parser workloads are unaffected.
 
 After-coverage on native macOS is 90.94% lines and 77.49% branches, against
 89.63% and 75.92% before this slice. Five interleaved warm `make test`

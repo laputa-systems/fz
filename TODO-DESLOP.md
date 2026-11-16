@@ -23,21 +23,13 @@ Types (DSLP-3): Rust escape-hatch matching lines 90 → 90; Python 0 → 0. Cand
 
 No contracts changed; witnesses not applicable. macOS lint and test passed; two fzy oracle cases skipped. Linux-specific lint paths were not measured on this host.
 
-Core Tests slice: [qualification report](docs/deslop-tests.md). The 27 baseline survivors are caught; line/branch coverage is 89.63%/75.92% on macOS. Five interleaved warm pairs remain within the test-cost budget. Linux and macOS CI provision the pinned fzy oracle. Foreground worker selection/restoration and Linux input/resource boundaries have real process probes. The remaining Tests component is terminal/signal mutation qualification in DSLP-4.
+Tests: [qualification report](docs/deslop-tests.md). The combined core, terminal and signal lane selects 448 mutants: 432 caught, 16 unviable, zero missed or timed out, with exact survivor dispositions and no accepted harness failures. Native macOS line/branch coverage is 90.94%/77.49%. Five interleaved warm test pairs satisfy the cost budget; five release terminal workload pairs satisfy the runtime gate. Linux and macOS CI provision the pinned fzy oracle. Ish consumer tests load merged candidate `17d0e665` and pass, with the documented manifest-only fixture adjustment. DSLP-5 remains open.
 
 ## Tickets
 
 
 
 
-### DSLP-4 · P2 · Tests: qualify terminal lifecycle mutation coverage
-
-- **Area:** deslop · tests
-- **Where:** src/terminal.rs; src/termination.rs; tests/foreground_probe.py; .cargo/mutants-gate.toml
-- **Problem:** The core Tests slice is qualified: 355 selected mutants, 348 caught, 7 unviable, zero missed or timed out; before/after coverage and test-cost checks pass. Terminal ownership, poll/read error paths and signal cleanup remain outside the current configured scope. They contain 160 terminal and 31 termination mutants and must receive their own survivor dispositions before the Tests step is complete. See docs/deslop-tests.md.
-- **Recommendation:** Extend the bounded critical scope to terminal ownership and signal lifecycle, run its before/after Scenario evidence, disposition every survivor and unrun decision region, and qualify the combined lane within its budget (shard if measured cost requires it). Accept: make test/lint/mutants-selftest pass, handoff/cleanup faults are caught, and no undispositioned survivor remains in that scope. Production changes also require ish consumer and performance gates.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-5 · P2 · Dead code: tools and debloat
 
