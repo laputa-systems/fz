@@ -25,8 +25,6 @@ No contracts changed; witnesses not applicable. macOS lint and test passed; two 
 
 Tests: [qualification report](docs/deslop-tests.md). The combined core, terminal and signal lane selects 448 mutants: 432 caught, 16 unviable, zero missed or timed out, with exact survivor dispositions and no accepted harness failures. Native macOS line/branch coverage is 90.94%/77.49%. Five interleaved warm test pairs satisfy the cost budget; five release terminal workload pairs satisfy the runtime gate. Linux and macOS CI provision the pinned fzy oracle. Ish consumer tests load merged candidate `17d0e665` and pass, with the documented manifest-only fixture adjustment. DSLP-5 remains open.
 
-## Tickets
-
 Dead code: Vulture 2.16 identified one unused `Dataset.description` field and
 its four constructor values in `benches/perf.py`; these five lines are removed.
 Repository callers, benchmark tests, CLI output/JSON serialization, docs,
@@ -54,7 +52,4 @@ declared behavior and cost. No further structural cut was established. No live
 feature, recovery path, compatibility behavior or declared gate is removed;
 there are no walk-back findings.
 
-
-
-
-
+## Tickets
