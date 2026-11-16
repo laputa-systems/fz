@@ -2,6 +2,15 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 #[test]
+fn selector_lifetime_follows_the_driver() {
+    let status = Command::new("python3")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/test_pty_session.py"))
+        .status()
+        .expect("python3 must be available to test selector lifetime");
+    assert!(status.success(), "selector lifetime failed: {status}");
+}
+
+#[test]
 fn bare_escape_cancels_without_a_resize_storm() {
     let mut child = Command::new("python3")
         .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/escape_probe.py"))

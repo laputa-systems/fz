@@ -36,6 +36,7 @@ import unittest
 from unittest.mock import patch
 import unicodedata
 from pathlib import Path
+from pty_session import Session
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -136,10 +137,6 @@ class Screen:
         return values[:last]
 
 
-def ignore_sighup():
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
-
-
 class PtyFz:
     def __init__(self, candidates=b"", args=(), rows=24, cols=80, close_stdin=True,
                  binary=None, ignore_hangup=False):
@@ -155,16 +152,8 @@ class PtyFz:
         # and remains queryable, so use it for the restoration assertion.
         self.original_termios = termios.tcgetattr(self.master)
         self.screen = Screen(rows, cols)
-        def prepare_terminal():
-            fcntl.ioctl(self.slave, termios.TIOCSCTTY, 0)
-            if ignore_hangup:
-                ignore_sighup()
-        self.proc = subprocess.Popen(
-            [str(binary or BIN), *args, "--tty", "/dev/tty"],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            pass_fds=(self.slave,),
-            start_new_session=True, preexec_fn=prepare_terminal,
-        )
+        self.proc = Session([str(binary or BIN), *args, "--tty", "/dev/tty"],
+                            self.slave, ignore_hangup)
         if candidates is not None:
             self.write_stdin(candidates)
             if close_stdin:
