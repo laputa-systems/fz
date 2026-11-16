@@ -660,22 +660,29 @@ class Acceptance(unittest.TestCase):
             def redrawn():
                 while time.monotonic() < deadline:
                     session.drain(.0005)
+                    status = session.proc.poll()
+                    if status is not None and time.monotonic() < deadline:
+                        self.fail("selector exited during an unexpired arrow sequence: %s\n%s" %
+                                  (status, session.failure_context()))
                     if len(session.screen.raw) > previous:
                         return True
                     time.sleep(.0001)
                 return False
-            if not redrawn():
+            def finish_late_attempt():
+                self.assertEqual(session.finish(timeout=2), (1, b"", b""))
                 session.close()
+            if not redrawn():
+                finish_late_attempt()
                 continue
             previous = len(session.screen.raw)
             os.kill(session.proc.pid, signal.SIGWINCH)
             if not redrawn():
-                session.close()
+                finish_late_attempt()
                 continue
             gap = time.monotonic() - started
             gaps.append(gap)
             if gap >= .020:
-                session.close()
+                finish_late_attempt()
                 continue
             self.assert_exit(session, b"[A\r", 0, b"bar\n")
             return
