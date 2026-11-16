@@ -26,7 +26,7 @@ jobs:
         include:
           - os: ubuntu-26.04-arm
             toolchain: nightly-2026-09-15
-          - os: macos-latest
+          - os: xcode-27
             toolchain: stable
     env:
       RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
