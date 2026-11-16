@@ -94,7 +94,8 @@ def guard(watch_fd, slave, ignore_hangup, selector_foreground, args):
         os.close(watch_fd)
     if status < 0:
         signum = -status
-        signal.signal(signum, signal.SIG_DFL)
+        if signum != signal.SIGKILL:
+            signal.signal(signum, signal.SIG_DFL)
         os.kill(os.getpid(), signum)
     return status
 
