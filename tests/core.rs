@@ -82,6 +82,7 @@ fn choices_preserve_exact_scores_and_scoring_length_boundaries() {
     choices.search(b"aa");
     assert_eq!(choices.getscore(0), Some(f64::INFINITY));
     assert_eq!(choices.source_index(0), Some(0));
+    assert_score_eq(-3.21, choices.getscore(1).unwrap());
     assert_eq!(choices.getscore(2), Some(f64::NEG_INFINITY));
     assert!(!choices.is_empty());
     assert!(Choices::new(Vec::new()).is_empty());
@@ -93,7 +94,7 @@ fn choices_preserve_exact_scores_and_scoring_length_boundaries() {
 #[test]
 fn choices_rank_partial_pages_before_and_after_rank_all() {
     let mut labels: Vec<usize> = (0..4000).map(|n| n % 1000).collect();
-    let mut seed = 0x1357_2468_u64;
+    let mut seed = 24_u64;
     for index in (1..labels.len()).rev() {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
         labels.swap(index, seed as usize % (index + 1));
