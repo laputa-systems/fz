@@ -30,6 +30,7 @@ jobs:
             toolchain: stable
     env:
       RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
+      FZY_ORACLE: ${{ github.workspace }}/.work/tmp/fzy/fzy
     permissions:
       contents: read
     defaults:
@@ -39,5 +40,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Build pinned fzy oracle
+        run: |
+          git init --quiet .work/tmp/fzy
+          git -C .work/tmp/fzy fetch --depth 1 https://github.com/jhawthorn/fzy.git 34b88869d022e861da4846c4463aea3ddfb3ff30
+          git -C .work/tmp/fzy checkout --detach FETCH_HEAD
+          make -C .work/tmp/fzy fzy
       - name: Test
         run: make test
+
+  mutants:
+    name: mutants
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      RUST_TEST_THREADS: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: taiki-e/install-action@4a76afe23f9e08d2d9550fb56e556444e8611d21 # v2.90.4
+        with:
+          tool: cargo-mutants@27.1.0
+      - name: mutants
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: make mutants-diff BASE="origin/$BASE_REF"

@@ -19,3 +19,22 @@ FZY_ORACLE="$PWD/.work/tmp/fzy/fzy" cargo test
 ```
 
 The Python harness is `tests/acceptance.py`; `tests/acceptance.rs` runs it during `cargo test`. `tests/cli.rs`, `tests/candidates.rs`, and `tests/core.rs` cover the CLI, candidate storage, and core matcher and ranking behavior.
+
+CI builds the pinned fzy oracle before `make test`, so both differential cases
+run there. The foreground probe calls `run_in_foreground` from a background
+worker. It checks selection, cancellation, pending input, serial help,
+foreground-group restoration and terminal attributes.
+
+Linux CLI tests also need a C compiler. They compile two small interposers
+under `.work/tmp` to inject stdin read errors and count actual thread creation.
+Only the spawned test binary loads those libraries through `LD_PRELOAD`.
+
+`make coverage` reports line and branch coverage. Coverage is not a gate.
+`make mutants-selftest` checks the mutation gate's selection and result parser.
+`make mutants-diff BASE=origin/main` runs the Linux mutation lane and requires
+Python 3.11 or newer. The gate selects changed production lines together with
+the configured critical scope when tests, fixtures or build configuration change.
+It rejects incomplete results, unresolved timeouts and infrastructure markers
+from the PTY harness. The critical scope is scoring, candidate storage, ranking
+and CLI parsing. The lane remains under qualification until its negative
+controls and survivor dispositions pass.

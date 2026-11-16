@@ -15,6 +15,10 @@ libc = "0.2"
 rustybench = "0.1"
 laputa-ptytest = "0.4"
 
+[[test]]
+name = "foreground"
+harness = false
+
 [[bench]]
 name = "bench"
 harness = false

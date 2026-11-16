@@ -18,6 +18,8 @@ fn filter_preserves_bytes_delimiters_and_stable_ties() {
     for (args, input, expected) in [
         (vec!["-e", ""], b"\nfoo\n\nbar\nfoo".as_slice(), b"foo\nbar\nfoo\n".as_slice()),
         (vec!["-0e", ""], b"foo\nbar\0\0baz\0", b"foo\nbar\nbaz\n"),
+        (vec!["--read-null", "--show-matches="], b"foo\nbar\0\0baz\0", b"foo\nbar\nbaz\n"),
+        (vec!["--workers=1", "--show-info", "--show-matches=ba"], b"foo\nbar\nbaz\n", b"bar\nbaz\n"),
         (vec!["--show-matches="], b"\xff\ncarriage\r\n", b"\xff\ncarriage\r\n"),
         (vec!["-e", ""], b"foo\0ignored\nbar\n", b"foo\n"),
         (vec!["-e", "x"], b"foo\nbar\n", b""),
@@ -114,4 +116,62 @@ fn missing_tty_is_failure_without_selection() {
     let result = run(&["--tty", "/definitely/missing/fz-tty"], b"foo\n");
     assert_eq!(result.status.code(), Some(1));
     assert!(result.stdout.is_empty());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn native_input_errors_and_worker_limits() {
+    use std::time::{Duration, Instant};
+
+    struct Scratch(std::path::PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".work/tmp");
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join(format!("read-errors-{}", std::process::id()));
+    std::fs::create_dir(&path).unwrap();
+    let scratch = Scratch(path);
+    let library = scratch.0.join("read-error.so");
+    let status = Command::new("cc").args(["-shared", "-fPIC"])
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/read_error.c"))
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/thread_count.c"))
+        .arg("-o").arg(&library).args(["-ldl", "-pthread"]).status().unwrap();
+    assert!(status.success());
+    for (error, code, stdout) in [(libc::EINTR, 0, b"alpha\n".as_slice()),
+                                  (libc::EIO, 1, b"".as_slice())] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_fz"))
+            .args(["-e", "a"]).env("LD_PRELOAD", &library)
+            .env("FZ_READ_ERROR", error.to_string())
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+            .spawn().unwrap();
+        child.stdin.take().unwrap().write_all(b"alpha\n").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("stdin error {error} did not terminate");
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(code));
+        assert_eq!(output.stdout, stdout);
+        assert_eq!(output.stderr.is_empty(), code == 0);
+    }
+    let mut input = b"zzzzzzzzzz\n".repeat(20_000);
+    input.extend_from_slice(b"aaaa\n");
+    for (workers, count) in [("1", b"0\n".as_slice()), ("4", b"3\n".as_slice())] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_fz"))
+            .args(["--workers", workers, "-e", "aaaa"])
+            .env("LD_PRELOAD", &library).env("FZ_COUNT_THREADS", "1")
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+            .spawn().unwrap();
+        child.stdin.take().unwrap().write_all(&input).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"aaaa\n");
+        assert_eq!(output.stderr, count);
+    }
 }

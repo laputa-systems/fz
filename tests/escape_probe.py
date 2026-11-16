@@ -13,6 +13,13 @@ import threading
 import time
 from pty_session import Session
 
+
+def report_harness_error(kind, value, traceback):
+    print("FZ_HARNESS_ERROR: escape probe setup or driver failed", file=sys.stderr)
+    sys.__excepthook__(kind, value, traceback)
+
+
+sys.excepthook = report_harness_error
 binary = sys.argv[1]
 master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))

@@ -70,6 +70,55 @@ fn has_match_preserves_fzys_asymmetric_ascii_case_rule() {
 }
 
 #[test]
+fn choices_preserve_exact_scores_and_scoring_length_boundaries() {
+    let exact = vec![b'a'; 1024];
+    let oversized = vec![b'a'; 1025];
+    assert_eq!(match_score(&exact, &exact), f64::INFINITY);
+    assert_eq!(match_positions(&exact, &exact), Some((0..1024).collect()));
+    assert_eq!(match_score(b"a", &oversized), f64::NEG_INFINITY);
+    assert_eq!(match_positions(b"a", &oversized), None);
+
+    let mut choices = Choices::new(vec![b"aa".to_vec(), exact, oversized]);
+    choices.search(b"aa");
+    assert_eq!(choices.getscore(0), Some(f64::INFINITY));
+    assert_eq!(choices.source_index(0), Some(0));
+    assert_eq!(choices.getscore(2), Some(f64::NEG_INFINITY));
+    assert!(!choices.is_empty());
+    assert!(Choices::new(Vec::new()).is_empty());
+    choices.search(b"");
+    assert_eq!(choices.source_index(3), None);
+    assert_eq!(choices.getscore(3), None);
+}
+
+#[test]
+fn choices_rank_partial_pages_before_and_after_rank_all() {
+    let mut labels: Vec<usize> = (0..4000).map(|n| n % 1000).collect();
+    let mut seed = 0x1357_2468_u64;
+    for index in (1..labels.len()).rev() {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        labels.swap(index, seed as usize % (index + 1));
+    }
+    let records = labels.iter().map(|&n| {
+        let mut row = vec![b'_'; n];
+        row.extend_from_slice(b"abz");
+        row
+    }).collect();
+    let mut choices = Choices::new(records);
+    let mut expected: Vec<_> = labels.into_iter().enumerate().collect();
+    expected.sort_unstable_by_key(|&(index, label)| (label, index));
+    choices.search(b"ab");
+    assert_score_eq(1.895, choices.getscore(0).unwrap());
+    for index in [0, 63, 64, 127, 128, 256, 1023, 1024, 3999] {
+        assert_eq!(choices.source_index(index), Some(expected[index].0));
+    }
+    choices.rank_all();
+    for (index, &(source, _)) in expected.iter().enumerate() {
+        assert_eq!(choices.source_index(index), Some(source));
+    }
+    assert_eq!(choices.source_index(4000), None);
+}
+
+#[test]
 fn score_prefers_starts_of_words() {
     assert!(match_score(b"amor", b"app/models/order") > match_score(b"amor", b"app/models/zrder"));
 }

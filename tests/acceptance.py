@@ -139,7 +139,7 @@ class Screen:
 
 class PtyFz:
     def __init__(self, candidates=b"", args=(), rows=24, cols=80, close_stdin=True,
-                 binary=None, ignore_hangup=False):
+                 binary=None, ignore_hangup=False, foreground_owner="selector"):
         self.master, self.slave = pty.openpty()
         import fcntl
         import struct
@@ -153,7 +153,7 @@ class PtyFz:
         self.original_termios = termios.tcgetattr(self.master)
         self.screen = Screen(rows, cols)
         self.proc = Session([str(binary or BIN), *args, "--tty", "/dev/tty"],
-                            self.slave, ignore_hangup)
+                            self.slave, ignore_hangup, foreground_owner=foreground_owner)
         if candidates is not None:
             self.write_stdin(candidates)
             if close_stdin:
@@ -948,7 +948,7 @@ class MultiSelectionTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    result = unittest.main(argv=[sys.argv[0]], verbosity=2, exit=False).result
+    result = unittest.main(argv=[sys.argv[0]], verbosity=2, exit=False, failfast=True).result
     if result.errors:
         print("FZ_HARNESS_ERROR: acceptance setup or driver failed", file=sys.stderr)
         sys.exit(86)
