@@ -25,7 +25,6 @@ struct OptionSpec {
     takes_value: bool,
 }
 
-// Keep recognized spellings, value requirements and displayed descriptions together.
 macro_rules! cli_options {
     ($(($short:literal, $long:literal, $value:literal, $takes_value:literal, $description:literal)),+ $(,)?) => {
         const OPTION_SPECS: &[OptionSpec] = &[
