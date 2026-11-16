@@ -8,6 +8,22 @@ import unittest
 
 
 class SessionLifetime(unittest.TestCase):
+    def test_supervisor_propagates_an_uncatchable_selector_signal(self):
+        import pty
+        from pty_session import Session
+        master, slave = pty.openpty()
+        process = Session([sys.executable, "-c",
+                           "import os,signal;os.kill(os.getpid(),signal.SIGKILL)"], slave)
+        try:
+            _stdout, stderr = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, -signal.SIGKILL, stderr.decode())
+            self.assertNotIn(b"FZ_HARNESS_ERROR:", stderr)
+        finally:
+            process.kill()
+            process.communicate(timeout=5)
+            os.close(master)
+            os.close(slave)
+
     def test_driver_death_reaps_a_selector_which_ignores_hangup_and_term(self):
         code = """
 import os, pty, signal, sys

@@ -124,7 +124,21 @@ and replacing the ignored-HUP predicate. The HUP fault exits 129 instead of
 selecting `beta`. Native macOS `make test lint mutants-selftest` passes with
 the pinned fzy oracle; native Linux foreground and acceptance pass, with
 the two differential cases left to the pinned-oracle CI jobs. The final
-mutation run, after-coverage and paired test-cost gate remain pending.
+mutation qualification remains pending. The first final-scope run selected
+448 and reported 432 caught, zero missed, 16 unviable and no timeouts, but
+the gate rejected its counts: the supervisor tried to install a handler for
+SIGKILL when cleanup killed a faulty selector. That raised EINVAL and the
+infrastructure marker. A new supervisor self-test reproduces the incorrect
+exit 1 before the fix and the propagated SIGKILL afterward. The gate's
+rejection is retained; those catch counts are not accepted evidence.
+
+After-coverage on native macOS is 90.94% lines and 77.49% branches, against
+89.63% and 75.92% before this slice. Five interleaved warm `make test`
+pairs, with the pinned fzy oracle and two Rust test threads, have medians
+12.155 seconds before and 13.116 after; the increase is inside the 20% or
+30-second budget. The host gate returned zero before and after. This cost
+and coverage evidence precedes the final SIGKILL supervisor regression;
+that small additional scenario is verified separately.
 
 ## Harness and gate controls
 
