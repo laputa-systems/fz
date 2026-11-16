@@ -93,6 +93,18 @@ defect. It was a source/evidence review, not another execution of the gates.
 The native checks and all required CI checks at that head remain the
 execution evidence. This report changes documentation only.
 
+The five seeded P2 steps (DSLP-1–5) and both discovered P2 harness findings
+(DSLP-8/9) are closed, as are the two P3 boundary findings (DSLP-6/7).
+No P1, accepted-risk exclusion, dependency removal or escaped shipped
+regression was established. Dead code removed five unread lines and retained
+all dependencies. Ground, Diagnose and Types merged in PRs #29–31; harness
+repairs in #32–33; Tests and its report in #34, #37–38; Dead code in #39.
+The deliberately failing gate control #35 remains closed and unmerged.
+Core and terminal candidate mutation jobs cost 10m40s and 14m34.6s,
+respectively, including their different reported setup boundaries; the
+bounded gate itself took 874.6 seconds for the terminal candidate. Total
+campaign CI minutes were not collected, so these are individual job costs.
+
 Method feedback: qualify failure classification before counting catches;
 exercise the public foreground boundary rather than only private ranking
 helpers; keep platform exclusions exact and justified; make whole-change
