@@ -774,7 +774,8 @@ impl Drop for Terminal {
 
 enum Wait { Ready, TimedOut, Interrupted }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
+#[cfg(target_os = "linux")]
 mod linux_tests {
     use super::ResizeEvents;
     use std::fs::File;

@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/signalfd.h>
 #include <unistd.h>
 
 ssize_t read(int fd, void *buffer, size_t length) {
@@ -15,6 +16,20 @@ ssize_t read(int fd, void *buffer, size_t length) {
         errno = atoi(getenv("FZ_READ_ERROR"));
         return -1;
     }
+    if (!injected && getenv("FZ_TTY_READ_ERROR") && isatty(fd)) {
+        injected = 1;
+        errno = atoi(getenv("FZ_TTY_READ_ERROR"));
+        return -1;
+    }
     ssize_t (*next_read)(int, void *, size_t) = dlsym(RTLD_NEXT, "read");
     return next_read(fd, buffer, length);
+}
+
+int signalfd(int fd, const sigset_t *mask, int flags) {
+    if (getenv("FZ_SIGNALFD_ERROR") && fd == -1) {
+        errno = atoi(getenv("FZ_SIGNALFD_ERROR"));
+        return -1;
+    }
+    int (*next_signalfd)(int, const sigset_t *, int) = dlsym(RTLD_NEXT, "signalfd");
+    return next_signalfd(fd, mask, flags);
 }
