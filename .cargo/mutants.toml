@@ -20,7 +20,7 @@ exclude_re = [
     # from_input skips empty records and the sole sentinel is not a record. A delimiter-backed record starts with a nondelimiter, so trimming cannot reach end == start.
     '^src/lib\.rs:287:23: replace > with >= in Candidates::get$',
     # Both buffer lengths are positive. The read loop appends every returned chunk until EOF; the change affects chunking, not bytes or error propagation.
-    '^src/cli\.rs:149:35: replace \* with \+ in read_candidates$',
+    '^src/cli\.rs:164:35: replace \* with \+ in read_candidates$',
     # At j == 0 the diagonal states are negative infinity. Entering the match branch still yields negative infinity and the same best state.
     '^src/score\.rs:190:61: replace > with >= in score_rows$',
     # At j == 0 diagonal_ending is negative infinity; only impossible cells gain the flag, and an impossible alignment is rejected before backtracking.
