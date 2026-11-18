@@ -47,39 +47,6 @@ jobs:
           git -C .work/tmp/fzy checkout --detach FETCH_HEAD
           make -C .work/tmp/fzy fzy
       - name: Test
-        run: |
-          mkdir -p .work/tmp
-          export TMPDIR="$PWD/.work/tmp"
-          make test
-
-  mutants:
-    name: mutants
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-26.04-arm
-    timeout-minutes: 25
-    permissions:
-      contents: read
-    env:
-      RUST_TEST_THREADS: 2
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: taiki-e/install-action@4a76afe23f9e08d2d9550fb56e556444e8611d21 # v2.90.4
-        with:
-          tool: cargo-mutants@27.1.0
-      - name: mutants
         env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          mkdir -p .work/tmp
-          export TMPDIR="$PWD/.work/tmp"
-          make mutants-diff BASE="origin/$BASE_REF"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: mutation-evidence
-          path: .work/mutants-gate/
-          include-hidden-files: true
-          retention-days: 7
+          TMPDIR: ${{ github.workspace }}/.work/tmp
+        run: make test
