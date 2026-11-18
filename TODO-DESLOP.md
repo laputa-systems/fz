@@ -114,12 +114,45 @@ is fixed in its owning repository. Its separate input-decoder timeout is
 recorded there with cause unproven, rather than attributed to this change.
 No shared skill or fleet policy change is required by this slice.
 
+## Current release timing
+
+[Hosted run 44419549107](https://github.com/laputa-systems/fz/actions/runs/44419549107)
+collected five complete alternating pairs from `17d0e665` and `0ec537d5`
+with the pinned fzy reference. Four attempts failed a readiness sample
+and were discarded in full. The accepted runs used the same native
+three-core macOS ARM64 runner, four fixtures, one warmup and five timed
+repetitions per side. Each side passed readiness checks before and after.
+
+The median of the five run medians exceeded both 2% and the baseline
+range width in the following rows. Times and ranges are milliseconds.
+
+| Workload and metric | Before median (range) | After median (range) |
+| --- | ---: | ---: |
+| Small, longer query, default wall | 3.251 (2.788–4.629) | 5.255 (3.631–8.257) |
+| Small, longer query, default CPU | 2.174 (1.974–2.868) | 3.502 (2.498–6.237) |
+| Small, longer query, default user CPU | 1.155 (1.043–1.381) | 1.547 (1.259–2.626) |
+| Default terminal, selective redraw | 2.474 (2.390–2.553) | 2.775 (2.369–3.146) |
+| Default terminal, exact redraw | 2.529 (2.487–2.635) | 2.987 (2.459–3.102) |
+| Default terminal, longer redraw | 2.534 (2.443–2.588) | 2.759 (2.411–2.998) |
+
+All six before and after ranges overlap. The unchanged fzy reference
+also rose from 3.239 to 4.306 ms in the small default longer-query wall
+row. Terminal peak RSS medians decreased by 16 KiB in both modes. The
+release binary was 240 bytes larger. The timings leave DSLP-10 open.
+
+Reproduce with the [exact proof script](https://github.com/laputa-systems/fz/blob/7914f6bc66a53fab76f86b71f03c6c9d73df5b66/.github/scripts/performance-trial.sh)
+and its companion workflow. Recover the ten numbered `PAIR_JSON` log
+lines by decoding the base64 payload and decompressing it with gzip.
+Check the four fixture hashes, the pinned fzy hash, and the two fz
+binary hashes across the five pairs. Compute the median and minimum
+and maximum across the five run medians for each side and workload.
+
 ## Tickets
 ### DSLP-10 · P2 · Qualify the current Fz revision on a quiet host
 
 - **Area:** Needs owner · timing environment
-- **Where:** benches/perf.py; benches/README.md; https://github.com/laputa-systems/fz/actions/runs/44348670074
-- **Problem:** The release comparison from 17d0e665a6ed881765adaffa04957f12251d3e82 to 0ec537d53eca0a12af07687250111a48023ee8d3 has no qualified timing samples. Local samples overlapped another CPU-intensive workload. The hosted macOS trial failed the timing-readiness check after samples had begun, even after retry and cooldown.
-- **Recommendation:** Reserve a quiet native macOS host, build separate release binaries for the two revisions, and run five interleaved pairs of the documented batch and terminal workloads while checking perf-gate-ready before and after each pair. Apply the existing timing and RSS budgets only to the qualified pairs.
+- **Where:** benches/perf.py; benches/README.md; https://github.com/laputa-systems/fz/actions/runs/44419549107
+- **Problem:** The five qualified hosted pairs exceeded the measured baseline spread in six rows. The unchanged reference also moved in the small-input wall case. The cause remains open.
+- **Recommendation:** Compare identical baseline binaries under the same protocol. Then rerun the comparison on a quiet native macOS host with the existing timing and RSS budgets.
 - **Fix with:** benchmark-checklist
 - **Effort:** S
