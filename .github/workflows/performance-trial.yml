@@ -1,0 +1,29 @@
+name: native performance trial
+
+on: pull_request
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  performance:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: joshuarli/usr
+          ref: 326b66eae2b4e3d2d8709200b4e100b0953a6a0d
+          path: .work/tools
+          persist-credentials: false
+      - name: Check and run the paired release workloads
+        run: bash .github/scripts/performance-trial.sh
