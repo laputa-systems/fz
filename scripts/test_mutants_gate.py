@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from mutants_gate import (
-    GateError, classify, parse_changes, parse_listing, read_results, selected_or_fail, scope_for, verdict,
+    GateError, classify, parse_changes, parse_listing, read_results, selected_or_fail, scope_for, shard_position, verdict,
 )
 
 CONFIG = {'irrelevant': ['*.md', 'LICENSE'], 'scope': ['src/main.rs']}
@@ -46,6 +46,13 @@ class SelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(GateError, 'empty selection'):
             selected_or_fail(True, [])
         selected_or_fail(False, [])
+
+    def test_shards_require_a_zero_based_position_in_their_count(self):
+        self.assertEqual(shard_position('0/1'), (0, 1))
+        self.assertEqual(shard_position('1/2'), (1, 2))
+        for value in ('0', '2/2', '0/0', '02/3', '-1/2', 'first/second'):
+            with self.subTest(value=value), self.assertRaisesRegex(GateError, 'MUTANTS_SHARD'):
+                shard_position(value)
 
 
 class ResultsTests(unittest.TestCase):
