@@ -7,6 +7,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 
@@ -124,11 +125,24 @@ def selected_or_fail(relevant, names):
         raise GateError('unexpected empty selection')
 
 
+def shard_position(value):
+    if not re.fullmatch(r'(?:0|[1-9]\d*)/[1-9]\d*', value):
+        raise GateError('expected MUTANTS_SHARD in the form 0/2')
+    number, total = map(int, value.split('/'))
+    if number >= total:
+        raise GateError('MUTANTS_SHARD index must be smaller than its shard count')
+    return number, total
+
+
 def main():
     started = time.monotonic()
     config = tomllib.loads(CONFIG.read_text())
     deadline = started + config['budget_seconds']
+    shard = os.environ.get('MUTANTS_SHARD', '0/1')
+    offset, total = shard_position(shard)
+    shard_args = ['--shard', shard, '--sharding', 'round-robin'] if total > 1 else []
     WORK.mkdir(parents=True, exist_ok=True)
+    run_root = Path(tempfile.mkdtemp(prefix='run-', dir=WORK))
     base = sys.argv[1]
     common = ['cargo', 'mutants', '--gitignore', 'true']
     phases = []
@@ -188,7 +202,7 @@ def main():
                 if old_end >= old_line or new_end >= new_line:
                     whole.update(config['scope'])
             if path not in whole:
-                file_diff = WORK / 'file.diff'
+                file_diff = run_root / 'file.diff'
                 file_diff.write_text(diff)
                 if not listing(['--in-diff', str(file_diff)]):
                     whole.add(path)
@@ -197,7 +211,7 @@ def main():
             args = sum((['-f', p] for p in sorted(whole)), [])
             phases.append(('whole ' + ', '.join(sorted(whole)), args, listing(args)))
         if in_diff:
-            path = WORK / 'pr.diff'
+            path = run_root / 'pr.diff'
             path.write_text(''.join(diffs[p] for p in in_diff))
             args = ['--in-diff', str(path)]
             phases.append(('diff ' + ', '.join(in_diff), args, listing(args)))
@@ -206,30 +220,36 @@ def main():
         selected_or_fail(relevant, selected)
         if not relevant:
             print('irrelevant change: no mutants selected', flush=True)
-        if not relevant:
             return
+        pending[:] = [name for _, _, names in phases for name in names[offset::total]]
+        print(f'union: {len(selected)}; shard: {shard}; selected: {len(pending)}', flush=True)
+        print(f'artifacts: {run_root}', flush=True)
         version = run(common + ['--version']).strip()
         configured = set(listing([]))
         unconfigured = set(listing(['--no-config']))
         excluded = str(len(unconfigured - configured))
-        for index, (label, args, names) in enumerate(phases):
-            pending[:] = [n for _, _, ns in phases[index:] for n in ns]
+        for index, (label, args, inventory) in enumerate(phases):
+            names = inventory[offset::total]
+            if shard_args and listing(args + shard_args) != names:
+                raise GateError(f'shard identities differ from the full inventory: {label}')
+            if not names:
+                continue
             print(f'phase: {label}; selected {len(names)}', flush=True)
-            out = WORK / f'phase-{index}'
+            out = run_root / f'phase-{index}'
             run(common + ['--baseline', 'run', '--timeout', str(config['timeout_seconds']),
                 '--build-timeout', str(config['build_timeout_seconds']), '--jobs', str(config['jobs']),
-                '--output', str(out)] + args, allowed=(0, 2, 3), capture=False)
+                '--output', str(out)] + args + shard_args, allowed=(0, 2, 3), capture=False)
             results = read_results(out / 'mutants.out/outcomes.json', names)
             for name, result in results.items():
                 counts[result] += 1
                 if result != 'timeout':
                     pending.remove(name)
             for number, name in enumerate(n for n, v in results.items() if v == 'timeout'):
-                regex = '^' + re.sub(r'([\\.^$|?*+()\[\]{}])', r'\\\1', name) + '$'
-                retry_args = args + ['--re', regex]
+                retry_shard = f'{inventory.index(name)}/{len(inventory)}'
+                retry_args = args + ['--shard', retry_shard, '--sharding', 'round-robin']
                 if listing(retry_args) != [name]:
                     raise GateError(f'timeout rerun selection error: {name}')
-                out = WORK / f'retry-{index}-{number}'
+                out = run_root / f'retry-{index}-{number}'
                 run(common + ['--baseline', 'skip', '--timeout', str(config['timeout_seconds'] * 3),
                     '--build-timeout', str(config['build_timeout_seconds']), '--jobs', '1',
                     '--output', str(out)] + retry_args, allowed=(0, 2, 3), capture=False)
@@ -250,7 +270,7 @@ def main():
         print(f'config sha256: {hashlib.sha256(CONFIG.read_bytes()).hexdigest()}; excluded mutants: {excluded}', flush=True)
         print(f'{host}; features: default', flush=True)
         for label, _, names in phases:
-            print(f'phase: {label}; selected: {len(names)}', flush=True)
+            print(f'phase: {label}; union: {len(names)}; selected: {len(names[offset::total])}', flush=True)
         print('counts: ' + ', '.join(f'{k}={v}' for k, v in counts.items()), flush=True)
         print('confirmed hangs: ' + (', '.join(hangs) if hangs else 'none'), flush=True)
         print(f'wall time: {time.monotonic() - started:.1f}s', flush=True)
