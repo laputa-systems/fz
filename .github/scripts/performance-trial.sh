@@ -46,7 +46,8 @@ check_load() {
 }
 
 wait_for_quiet() {
-    for attempt in {1..12}; do
+    local attempts=$1
+    for (( attempt = 0; attempt < attempts; attempt++ )); do
         if check_load -1; then return; fi
         sysctl -n vm.loadavg
         sleep 10
@@ -54,11 +55,12 @@ wait_for_quiet() {
     return 75
 }
 
+wait_for_quiet 48
 for pair in 1 2 3 4 5; do
     if (( pair % 2 )); then sides=(before after); else sides=(after before); fi
     for side in "${sides[@]}"; do
         result="$proof/$pair-$side.json"
-        wait_for_quiet
+        wait_for_quiet 12
         python3 benches/perf.py --warmup 1 --repetitions 5 \
             --fz "$proof/fz-$side" --fzy "$proof/fzy/fzy" \
             --data-dir "$proof/fixtures" --json "$result"
