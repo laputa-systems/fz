@@ -19,10 +19,7 @@ build_fz() {
 
 build_fz before 17d0e665a6ed881765adaffa04957f12251d3e82
 build_fz after 0ec537d53eca0a12af07687250111a48023ee8d3
-if cmp -s "$proof/fz-before" "$proof/fz-after"; then
-    printf '%s\n' 'expected different release binaries' >&2
-    exit 1
-fi
+cp "$proof/fz-before" "$proof/fz-control"
 git init --quiet "$proof/fzy"
 git -C "$proof/fzy" fetch --depth 1 https://github.com/jhawthorn/fzy.git 34b88869d022e861da4846c4463aea3ddfb3ff30
 git -C "$proof/fzy" checkout --detach FETCH_HEAD
@@ -59,36 +56,21 @@ wait_for_quiet() {
 wait_for_quiet 48
 qualified=0
 for attempt in {1..12}; do
-    pair=$((qualified + 1))
-    attempt_dir="$proof/attempt-$attempt"
-    mkdir -p "$attempt_dir"
-    if (( pair % 2 )); then sides=(before after); else sides=(after before); fi
-    for side in "${sides[@]}"; do
-        result="$attempt_dir/$side.json"
-        if ! wait_for_quiet 6; then
-            printf 'Discarded attempt %s before the %s sample\n' "$attempt" "$side"
-            continue 2
-        fi
-        if python3 benches/perf.py --warmup 1 --repetitions 5 \
-            --fz "$proof/fz-$side" --fzy "$proof/fzy/fzy" \
-            --data-dir "$proof/fixtures" --json "$result" > "$attempt_dir/$side.log" 2>&1; then
-            if ! check_load -1; then
-                printf 'Discarded attempt %s after the %s sample\n' "$attempt" "$side"
-                continue 2
-            fi
-        else
-            status=$?
-            cat "$attempt_dir/$side.log" >&2
-            exit "$status"
-        fi
-    done
-    for side in "${sides[@]}"; do
-        printf 'PAIR_JSON %s %s ' "$pair" "$side"
-        gzip -c "$attempt_dir/$side.json" | base64 | tr -d '\n'
-        printf '\n'
-    done
-    qualified=$pair
+    result="$proof/focused-$attempt.json"
+    if ! wait_for_quiet 6; then
+        printf 'Discarded block %s before sampling\n' "$attempt"
+        continue
+    fi
+    PYTHONPATH=benches python3 .github/scripts/focused-performance.py "$proof" > "$result"
+    if ! check_load -1; then
+        printf 'Discarded block %s after sampling\n' "$attempt"
+        continue
+    fi
+    qualified=$((qualified + 1))
+    printf 'BLOCK_JSON %s ' "$qualified"
+    gzip -c "$result" | base64 | tr -d '\n'
+    printf '\n'
     if (( qualified == 5 )); then exit 0; fi
 done
-printf 'Qualified %s of five pairs within the trial budget\n' "$qualified" >&2
+printf 'Qualified %s of five blocks within the trial budget\n' "$qualified" >&2
 exit 75
