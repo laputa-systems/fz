@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 10
+Next: 11
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -115,3 +115,11 @@ recorded there with cause unproven, rather than attributed to this change.
 No shared skill or fleet policy change is required by this slice.
 
 ## Tickets
+### DSLP-10 · P2 · Qualify the current Fz revision on a quiet host
+
+- **Area:** Needs owner · timing environment
+- **Where:** benches/perf.py; benches/README.md; https://github.com/laputa-systems/fz/actions/runs/44348670074
+- **Problem:** The release comparison from 17d0e665a6ed881765adaffa04957f12251d3e82 to 0ec537d53eca0a12af07687250111a48023ee8d3 has no qualified timing samples. Local samples overlapped another CPU-intensive workload. The hosted macOS trial failed the timing-readiness check after samples had begun, even after retry and cooldown.
+- **Recommendation:** Reserve a quiet native macOS host, build separate release binaries for the two revisions, and run five interleaved pairs of the documented batch and terminal workloads while checking perf-gate-ready before and after each pair. Apply the existing timing and RSS budgets only to the qualified pairs.
+- **Fix with:** benchmark-checklist
+- **Effort:** S
