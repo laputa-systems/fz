@@ -5,6 +5,7 @@
 - Build: `cargo build`
 - Test: `cargo test`
 - Check: `cargo clippy --all-targets --all-features -- --deny warnings`
+- Benchmarks: `make bench-list`, `make bench-check`, `make bench` (selectors in `benches/README.md`; Full is manual-only)
 
 ## Hard invariants
 
