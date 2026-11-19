@@ -147,12 +147,61 @@ Check the four fixture hashes, the pinned fzy hash, and the two fz
 binary hashes across the five pairs. Compute the median and minimum
 and maximum across the five run medians for each side and workload.
 
-## Tickets
-### DSLP-10 · P2 · Qualify the current Fz revision on a quiet host
+[The identical-binary control](https://github.com/laputa-systems/fz/actions/runs/44421140205)
+used five qualified pairs with both Fz files copied from the baseline
+and kept the same fzy reference. None of the six rows above exceeded
+the bound. A different row, default dense 100k-path user CPU, went
+from 19.726 to 23.208 ms with a baseline range of 19.337–22.641 ms.
 
-- **Area:** Needs owner · timing environment
-- **Where:** benches/perf.py; benches/README.md; https://github.com/laputa-systems/fz/actions/runs/44419549107
-- **Problem:** The five qualified hosted pairs exceeded the measured baseline spread in six rows. The unchanged reference also moved in the small-input wall case. The cause remains open.
-- **Recommendation:** Compare identical baseline binaries under the same protocol. Then rerun the comparison on a quiet native macOS host with the existing timing and RSS budgets.
-- **Fix with:** benchmark-checklist
-- **Effort:** S
+[The independent repeat](https://github.com/laputa-systems/fz/actions/runs/44422469442)
+used five qualified pairs and the exact binary and fixture digests
+from the first comparison. Across the 254 Fz measurements, no median
+increase exceeded both 2% and the baseline range width. The same
+small default longer-query wall row rose again. Fz went from 2.585
+to 3.473 ms within the 2.157–6.387 ms baseline range. The unchanged
+fzy reference went from 2.688 to 3.342 ms. The exact and selective
+redraw medians decreased, and the longer redraw's increase was
+within its baseline spread.
+
+[The focused trial](https://github.com/laputa-systems/fz/actions/runs/44423775482)
+ran the small default longer-query invocation with the two exact Fz
+release binaries, a byte-identical copy of the baseline and the same
+pinned fzy source. All five blocks passed readiness before and after.
+Each block rotated the four executables through all four positions
+over 40 rounds. All 800 timed invocations exited successfully. The
+Fz hashes and input digest match the full comparisons. The fzy build
+hash is consistent within the focused trial.
+
+Each row below uses the median of the 40 paired percentage changes
+per block, then reports the median and range across the five blocks.
+
+| Measure | Candidate vs baseline | Identical copy vs baseline |
+| --- | ---: | ---: |
+| Wall time | −0.23% (−1.35 to +1.92) | +2.85% (−0.35 to +10.11) |
+| Total CPU | +0.19% (−2.79 to +2.91) | +2.10% (−1.37 to +7.92) |
+| User CPU | −0.63% (−3.82 to +1.13) | +2.23% (−0.54 to +7.31) |
+| Peak RSS | +0.89% (+0.89 to +0.89) | 0% (0 to 0) |
+
+The small-input rise from the two full sweeps did not recur when
+the children ran consecutively. The independent full sweep meets
+the existing bound. To reproduce the focused case, use the
+[proof script at 8d6e375](https://github.com/laputa-systems/fz/blob/8d6e375ee41b51cec6a718ea6d94efdb388f350e/.github/scripts/performance-trial.sh)
+with the same hosted job and decode the five `BLOCK_JSON` lines.
+
+The final consumer check imported
+`0ec537d53eca0a12af07687250111a48023ee8d3` with
+`scripts/vendor-fz.sh` into a detached ish checkout at
+`fc62468e2428f9aea6fcd611b0820ab709ce0c65`. The lockfile matched
+the checked-in ish lockfile. All four worker tests and six fuzzy
+PTY cases passed, along with workspace Clippy. The full `make test`
+run on macOS ARM64 completed with 1,550 passes and eight ignored
+cases across its top-level test reports. Reproduce with
+`CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1` and
+`cpu-guard --cores 3 -- make test` in the isolated checkout. The
+earlier two-core and four-minute limits interrupted separate
+attempts. The completed run used an eight-minute wall limit.
+
+DSLP-10 is closed with the independent full timing repeat, the
+focused paired control and the current consumer check.
+
+## Tickets
