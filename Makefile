@@ -15,6 +15,7 @@ build:
 	$(call cargo,dev) build
 
 test:
+	python3 -B -m unittest benches.test_run
 	$(call cargo,test) test --quiet
 
 test-ci:
@@ -59,3 +60,15 @@ install: release
 	@if test "$$(uname -s)" = Darwin; then \
 		codesign -fs - ~/.local/bin/$(NAME); \
 	fi
+
+BENCH_ARGS ?=
+
+.PHONY: bench bench-check bench-list
+bench:
+	python3 -B benches/run.py $(BENCH_ARGS)
+
+bench-check:
+	python3 -B benches/run.py --check $(BENCH_ARGS)
+
+bench-list:
+	python3 -B benches/run.py --list

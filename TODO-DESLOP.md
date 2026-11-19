@@ -1,9 +1,32 @@
 Prefix: DSLP
-Next: 11
+Next: 13
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
 ## Report
+
+Bench audit: Rustybench's `has_match`, `score`, and `positions` rows isolate
+matching, ranking primitives and highlights on paths and the 1024-byte boundary;
+`candidates_parse` covers input parsing at small, numeric, path and long sizes;
+`choices_search` covers dense, selective, no-match, long and parallel searches;
+the interactive Choices sequence covers refinement and edits. These synthetic
+rows consume results but do not independently assert them. Process filter rows
+cover small, numeric, path and long inputs, default and serial modes, checking
+complete output against fzy before timing. PTY rows check ranked redraws and
+terminal restoration, and measure redraw and process RSS. CPU is per child;
+parallel Rust allocation data omits worker allocations. The process medians use
+interleaved fz/fzy runs, five samples by default; the accepted 1.1 ratio is
+relative to fzy, not an earlier fz. The Rust budget is a same-host reference,
+not an integrated gate. Fixture digests and binary hashes are recorded by the
+process harness; Rust runs lack an equivalent correctness oracle and artifact
+identity. Host readiness must qualify timing; a busy run is inconclusive.
+
+Ranked gaps: DSLP-11 (P3) covers missed same-version regressions and the
+unintegrated budget; DSLP-12 (P3) covers representative inputs and attribution
+using separate CPU sampling, allocation and syscall profiling. Current data
+cannot resolve those questions. Sampling and tracing add overhead and must stay
+outside timed runs; no profiling overhead was measured in this audit.
+
 
 Ground base: `1a42f7c3bebecdd63331524366492252ccf23870`; macOS arm64, fresh target: `make test` 15.65s cold, 6.99s warm; `make lint` 2.34s, all exit 0 under `cpu-guard --cores 6`. The acceptance harness ran 24 cases, skipping two differential oracle cases because fzy was absent; PR CI does not provision an oracle, and `benches/test_perf.py` is outside `make test`. Python comprises test harnesses and benchmark tooling, not shipped runtime. No vendored trees in this repository; ish vendors fz with its own UPSTREAM. Performance workloads: `benches/bench.rs` and `benches/perf.py`; see `benches/README.md`. CI changed from `cargo test` to `make test`. No runtime changes; consumer and performance gates unaffected.
 
@@ -205,3 +228,21 @@ DSLP-10 is closed with the independent full timing repeat, the
 focused paired control and the current consumer check.
 
 ## Tickets
+### DSLP-11 · P3 · Measure regressions against a same-version baseline
+
+- **Area:** Benchmarks · regression detection
+- **Where:** benches/perf.py; benches/RESULTS.md; benches/budget-macos-aarch64.json
+- **Problem:** The process ratio compares fz with fzy rather than a previous fz build, while the Rust budget is a same-host reference without an integrated candidate check. A shared slowdown or a change within the fzy ratio can escape regression detection.
+- **Recommendation:** Add a reproducible interleaved baseline-versus-candidate process comparison with host qualification and an explicit uncertainty rule; assess the existing Rust budget on its intended host.
+- **Fix with:** bench-pyramid
+- **Effort:** M
+
+
+### DSLP-12 · P3 · Attribute process and worker performance costs
+
+- **Area:** Benchmarks · attribution
+- **Where:** benches/bench.rs; benches/perf.py; benches/README.md
+- **Problem:** Parallel Rust allocation measurements omit worker allocations, and process CPU and RSS totals do not identify hot code, allocation sites or syscall and I/O causes. The synthetic path fixtures also cannot establish performance on a real user input distribution.
+- **Recommendation:** Capture a representative anonymized input and document separate sampling and allocation or syscall profiling recipes for the CLI and workers, with profiling overhead excluded from timed runs.
+- **Fix with:** bench-pyramid
+- **Effort:** M

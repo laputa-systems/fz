@@ -2,6 +2,36 @@
 
 The benchmark suite has an in-process matcher/parser suite and a release-process comparison. The measured acceptance record is in [RESULTS.md](RESULTS.md).
 
+## Entrypoint
+
+`make bench-list` lists the named workloads, tiers, areas and estimated cost.
+`make bench-check` checks prerequisites for the default Edit tier; `make bench`
+runs it. Pass options with `BENCH_ARGS`, for example:
+
+```sh
+make bench BENCH_ARGS='--tier change --name rust-search'
+make bench BENCH_ARGS='--tier change --area process --dry-run'
+make bench-check BENCH_ARGS='--tier scenario --skip process-quick'
+```
+
+Tiers are ceilings: Edit tests the harness; Change runs a one-sample Rust
+search and a one-repetition process smoke; Scenario adds the individually named Rust rows and
+three-repetition process comparisons. Full adds the five-repetition process
+suite and is manual-only: explicitly select `--tier full` to run it. Names,
+areas and skips are repeatable; names and skips take workload names, areas
+take area names. Unknown or empty selections fail before work starts. Dry
+runs check prerequisites and print commands without writing results.
+
+Rust workloads require Cargo and the pinned toolchain. Process workloads require
+`cargo build --release` and the pinned fzy checkout built at `.work/tmp/fzy`
+following [the testing guide](../docs/testing.md); `--fz`, `--fzy` and
+`--oracle` override paths. Preflight warns about stale fz builds. Runs write
+logs, process JSON, fixture data and a summary under dated `.work/bench/`
+directories. The summary records exclusions, status, duration and host readiness;
+completion without a budget check is not a performance verdict. The readiness
+check does not prevent exploratory measurements, but unqualified timing is
+inconclusive. No workload is a replacement for a paired regression gate.
+
 ## In-process measurements
 
 Run Rustybench with:
