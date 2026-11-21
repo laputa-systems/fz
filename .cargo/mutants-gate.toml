@@ -1,4 +1,5 @@
 scope = ["src/score.rs", "src/lib.rs", "src/cli.rs", "src/terminal.rs", "src/termination.rs"]
+critical = "^(has_match|match_score|match_positions|score_rows|ScoreWorkspace::score|rank|rank_into|score_range|Choices::search|Choices::rank_through|Choices::next|Choices::prev|Choices::source_index|Choices::selected)$"
 irrelevant = ["*.md", "LICENSE", "LICENSE.*"]
 budget_seconds = 1200
 timeout_seconds = 40
