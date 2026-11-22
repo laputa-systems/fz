@@ -21,6 +21,8 @@ suite and is manual-only: explicitly select `--tier full` to run it. Names,
 areas and skips are repeatable; names and skips take workload names, areas
 take area names. Unknown or empty selections fail before work starts. Dry
 runs check prerequisites and print commands without writing results.
+A Rust workload requires a measurement for its exact benchmark name, with
+at least one sample, enough iterations to account for the samples, and a median.
 
 Rust workloads require Cargo and the pinned toolchain. Process workloads require
 `cargo build --release` and the pinned fzy checkout built at `.work/tmp/fzy`

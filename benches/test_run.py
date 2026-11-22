@@ -1,4 +1,5 @@
 import argparse
+import json
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -47,6 +48,17 @@ class SelectionTests(unittest.TestCase):
             errors = run.preflight(['process-smoke'], Path('/missing/fz'), Path('/missing/fzy'), Path('/missing/oracle'))
         self.assertTrue(any('fz missing' in error for error in errors))
         self.assertTrue(any('pinned fzy' in error for error in errors))
+
+    def test_rust_measurement_requires_completed_selected_work(self):
+        name = run.CHANGE_SEARCH
+        row = {'name': f'bench::{name}', 'sample_count': 1, 'iter_count': 1, 'median_ns': 0}
+        for changes in ({'name': 'bench::other'}, {'sample_count': 0}, {'sample_count': True},
+                        {'iter_count': 0}, {'median_ns': None}):
+            with self.subTest(changes=changes):
+                report = json.dumps({'schema': 1, 'benchmarks': [row | changes]})
+                self.assertFalse(run.has_rust_measurement(report, name))
+        self.assertFalse(run.has_rust_measurement(name, name))
+        self.assertTrue(run.has_rust_measurement(json.dumps({'schema': 1, 'benchmarks': [row]}), name))
 
 
 if __name__ == '__main__':

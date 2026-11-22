@@ -2,6 +2,7 @@
 """Select and run the existing benchmark harnesses."""
 import argparse
 import datetime
+import json
 import os
 from pathlib import Path
 import platform
@@ -14,6 +15,7 @@ import time
 
 ROOT = Path(__file__).resolve().parent.parent
 TIERS = ('edit', 'change', 'scenario', 'full')
+CHANGE_SEARCH = 'choices_search_paths_100k_selective'
 WORK = {
     'harness-tests': ('edit', 'harness', 'Process harness correctness tests', 'seconds'),
     'rust-search': ('change', 'matcher', '100k selective path search, one sample', 'minutes'),
@@ -66,9 +68,34 @@ def command(name, directory, fz, fzy):
         return [sys.executable, '-B', '-m', 'unittest', 'benches.test_perf']
     if name.startswith('rust-'):
         cmd = ['cargo', 'bench', '--bench', 'bench', '--', '--format', 'json']
-        return cmd + (['--sample-count', '1', '--sample-size', '1', 'choices_search_paths_100k_selective'] if name == 'rust-search' else [name.removeprefix('rust-')])
+        if name == 'rust-search':
+            return cmd + ['--sample-count', '1', '--sample-size', '1', '--exact', f'bench::{CHANGE_SEARCH}']
+        return cmd + ['--exact', f'bench::{name.removeprefix("rust-")}']
     cmd = [sys.executable, 'benches/perf.py', '--fz', str(fz), '--fzy', str(fzy), '--data-dir', str(directory / 'data'), '--json', str(directory / (name + '.json'))]
     return cmd + (['--smoke'] if name == 'process-smoke' else ['--quick'] if name == 'process-quick' else [])
+
+
+def has_rust_measurement(log: str, name: str) -> bool:
+    for line in log.splitlines():
+        try:
+            report: object = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(report, dict) or report.get('schema') != 1:
+            continue
+        rows: object = report.get('benchmarks')
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict) or row.get('name') != f'bench::{name}':
+                continue
+            samples: object = row.get('sample_count')
+            iterations: object = row.get('iter_count')
+            median: object = row.get('median_ns')
+            if (type(samples) is int and samples > 0 and type(iterations) is int and iterations >= samples
+                    and type(median) is int and median >= 0):
+                return True
+    return False
 
 
 def main():
@@ -118,12 +145,18 @@ def main():
         ready = shutil.which('perf-gate-ready')
         before = subprocess.run([ready], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode if timed and ready else None
         start = time.monotonic()
-        with (directory / (name + '.log')).open('w') as log:
+        log_path = directory / (name + '.log')
+        with log_path.open('w') as log:
             result = subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
         duration = time.monotonic() - start
         after = subprocess.run([ready, '-1'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode if timed and ready and before == 0 else None
         validity = 'qualified host' if before == 0 and after == 0 else 'inconclusive: host readiness not established' if timed else 'not timed'
         line = f'{name}: exit {result.returncode}; {duration:.2f}s; {validity}; no budget checked, completion is not a performance verdict'
+        if result.returncode == 0 and name.startswith('rust-'):
+            benchmark = CHANGE_SEARCH if name == 'rust-search' else name.removeprefix('rust-')
+            if not has_rust_measurement(log_path.read_text(), benchmark):
+                line += f'; incomplete: missing measurement for {benchmark}'
+                failed = True
         print(line, flush=True)
         summary.extend([f'command: {shlex.join(cmd)}', line])
         failed |= result.returncode != 0
