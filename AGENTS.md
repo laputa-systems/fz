@@ -26,6 +26,8 @@
 
 ## Verification
 
+`make clean` removes the checkout's ordinary `./target` directory. It refuses a file or symlink at that path.
+
 - `cpu-guard --cores 6 -- make test`: Ground cold/warm 15.65s/6.99s; core Tests slice warm median 12.17s with `RUST_TEST_THREADS=2` and the pinned fzy oracle (five pairs; baseline 10.95s). Python 3 required.
 - `cpu-guard --cores 6 -- make lint`: 2.34s (macOS arm64, warm target).
 - CLI flags, byte input, filter output, errors and exit codes: `tests/cli.rs`; interactive keys, terminal output, cancellation and multi-select: `tests/acceptance.py`, `tests/default_tty.rs`.
