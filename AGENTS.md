@@ -7,6 +7,8 @@
 - Check: `cargo clippy --all-targets --all-features -- --deny warnings`
 - Benchmarks: `make bench-list`, `make bench-check`, `make bench` (selectors in `benches/README.md`; Full is manual-only)
 
+The roadmap, [docs/roadmap.md](docs/roadmap.md), holds all current and future work; its Status is the resume point.
+
 ## Hard invariants
 
 - Preserve fzy's matching, ranking, key bindings, exit status, and stdin/stdout behavior in default single-select mode.
