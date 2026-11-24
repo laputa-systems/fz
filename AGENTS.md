@@ -35,7 +35,7 @@ The roadmap, [docs/roadmap.md](docs/roadmap.md), holds all current and future wo
 - CLI flags, byte input, filter output, errors and exit codes: `tests/cli.rs`; interactive keys, terminal output, cancellation and multi-select: `tests/acceptance.py`, `tests/default_tty.rs`.
 - Differential CLI and interactive oracle cases in `tests/acceptance.py` skip locally without fzy; PR CI builds the pinned oracle; `benches/test_perf.py` is not in `make test`.
 - Public matcher, scoring, rank and Choices API: `tests/core.rs`; Candidates: `tests/candidates.rs`; Picker: `tests/picker.rs`. CLI `run`: `tests/cli.rs`; foreground handoff, pending input and worker help: `tests/foreground.rs` and `tests/foreground_probe.py`.
-- Fast Rust API tiers cover scorer/candidates/ranking; real CLI and PTY process tiers cover flags, errors, foreground ownership and cleanup. PTY acceptance dominates elapsed time; see `docs/deslop-tests.md`.
+- Fast Rust API tiers cover scorer/candidates/ranking; real CLI and PTY process tiers cover flags, errors, foreground ownership and cleanup. PTY acceptance dominates elapsed time.
 - Persistent file formats, wire formats, endpoints: none.
 - Performance: `benches/bench.rs` and `benches/perf.py` cover matcher, filtering and terminal redraw; see `benches/README.md` for workloads and prerequisites.
 - Library consumer: ish vendors fz; run ish tests against the candidate for affected API changes.

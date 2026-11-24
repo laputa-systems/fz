@@ -1,7 +1,16 @@
 Prefix: FUZ
-Next: 3
+Next: 5
 
 # Open work
+### FUZ-3 · P2 · Resolve the consumer input framing test stall
+
+- **Area:** Consumer validation
+- **Where:** https://github.com/joshuarli/ish/issues/29; ish src/input.rs:1107
+- **Problem:** An ish full consumer test timed out waiting for a sentinel in the parallel input framing scenario; its cause and any connection to fz are unproven, and the upstream consumer issue remains open.
+- **Recommendation:** Resolve the tracked ish failure and rerun the full consumer suite before relying on a fresh full-suite qualification.
+- **Fix with:** root-cause
+- **Effort:** M
+
 ### FUZ-1 · P3 · Measure regressions against a same-version baseline
 
 - **Area:** Benchmarks · regression detection
@@ -18,5 +27,14 @@ Next: 3
 - **Problem:** Parallel Rust allocation measurements omit worker allocations, and process CPU and RSS totals do not identify hot code, allocation sites or syscall and I/O causes. The synthetic path fixtures also cannot establish performance on a real user input distribution.
 - **Recommendation:** Capture a representative anonymized input and document separate sampling and allocation or syscall profiling recipes for the CLI and workers, with profiling overhead excluded from timed runs.
 - **Fix with:** bench-pyramid
+- **Effort:** M
+
+### FUZ-4 · P4 · Exercise the large input offset transition
+
+- **Area:** Candidate storage testing
+- **Where:** src/lib.rs:245; tests/candidates.rs
+- **Problem:** Inputs larger than 4 GiB select wide offsets, but the input-length transition has not been exercised with an actual large input; from_records covers the wide representation without testing that transition.
+- **Recommendation:** Add a resource-aware boundary check for the actual input-length transition while preserving coverage of candidate contents.
+- **Fix with:** none
 - **Effort:** M
 

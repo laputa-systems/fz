@@ -36,5 +36,8 @@ Python 3.11 or newer. The gate selects changed production lines together with
 the configured critical scope when tests, fixtures or build configuration change.
 It rejects incomplete results, unresolved timeouts and infrastructure markers
 from the PTY harness. The critical scope is scoring, candidate storage, ranking
-and CLI parsing. The core lane is qualified; see [the evidence](deslop-tests.md). Terminal
-and signal mutation qualification remains in DSLP-4.
+and CLI parsing.
+
+Rustix's raw Linux backend bypasses libc interposition for readiness polling;
+use a syscall filter when injecting poll failures. On Darwin, process pending
+canonical input with FIONREAD before comparing restored terminal attributes.
