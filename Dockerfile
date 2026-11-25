@@ -12,13 +12,13 @@ ARG RUSTUP_AARCH64_SHA256=1ddf36182ac5d1782dbeefcb9bea7f5f9412d88f4a0d5047b1564a
 # The acceptance harness in tests/acceptance.rs runs tests/acceptance.py with python3.
 RUN apk add --no-cache \
     binutils=2.45.1-r1 \
-    python3=3.14.10-r1 \
+    python3=3.14.10-r2 \
     file=5.47-r2 \
     make=4.4.1-r4 \
     strace=6.19-r1 \
     musl-dev=1.2.6-r3 \
     libgcc=15.2.0-r5 \
-    git=2.54.0-r0 \
+    git=2.54.1-r0 \
     tzdata=2026f-r0
 
 # rustix requests libutil for Unix PTY support; musl provides those symbols in
